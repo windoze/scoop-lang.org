@@ -1,0 +1,14 @@
+// Bind C functions from the default native namespace (libc)
+@Extern(name = "abs")
+fun cAbs(value: Int): Int
+
+@Extern(name = "getpid")
+fun cGetPid(): Int
+
+fun main() {
+    // C ABI externs are unsafe and must be called from an unsafe context
+    @Unsafe {
+        println(cAbs(-42))
+        println(cGetPid() > 0)
+    }
+}

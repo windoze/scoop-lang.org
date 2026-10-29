@@ -1,0 +1,37 @@
+import scoop.collections.*
+import scoop.text.*
+
+fun repeat(times: Int, action: (Int) -> Unit) {
+    for (i in 0 until times) action(i)
+}
+
+class Cell(var value: Int)
+
+fun makeCounter(): () -> Int {
+    // closures capture by value and cannot capture a `var`;
+    // share mutable state through an explicit reference object
+    val cell = Cell(0)
+    return {
+        cell.value += 1
+        cell.value
+    }
+}
+
+fun main() {
+    repeat(2) { i -> println(f"tick ${i}") }
+
+    val next = makeCounter()
+    next()
+    println(next())
+
+    val words = listOf<String>("kotlin", "scoop", "rust", "swift")
+    val result = words
+        .filter { it.charLength > 4L }
+        .map { it.uppercaseAscii() }
+        .sorted()
+    println(result.joinToString(", "))
+
+    val lengths = HashMap<String, Long>()
+    for (w in words) lengths[w] = w.charLength
+    println(lengths["scoop"] ?: 0L)
+}

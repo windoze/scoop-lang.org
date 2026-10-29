@@ -1,0 +1,25 @@
+title: Scoop 用户指南
+description: 面向 Scoop 使用者的操作指南、可运行示例与常见问题。
+url: https://scoop-lang.org
+baseurl: /guides
+source: guides
+destination: dist/guides
+timezone: Asia/Shanghai
+encoding: utf-8
+markdown: kramdown
+highlighter: none
+kramdown:
+  input: GFM
+  syntax_highlighter: null
+  auto_id_stripping: true
+strict_front_matter: true
+liquid:
+  error_mode: strict
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: guide
+      guide: true
+exclude:
+  - "examples/*.out"

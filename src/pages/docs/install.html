@@ -1,0 +1,183 @@
+<!-- title: 快速开始; nav: install; layout: docs; description: 安装 Scoop 工具链，运行第一个程序，创建并测试 Cone 项目。 -->
+<h1>快速开始</h1>
+<p class="intro">安装 Scoop 工具链、运行第一个程序，然后创建一个带测试的项目。本页按当前工具包布局介绍安装、依赖管理与常用命令。</p>
+
+<h2 id="install">安装工具链</h2>
+<p>Scoop 以完整的工具包分发：编译器、包管理器、链接器、语言服务、调试器、预编译的标准库（<code>.slib</code>）、C 运行时和配套原生库放在同一个目录里，不需要另外安装 LLVM。构建和链接应用仍需下面列出的系统开发工具。</p>
+
+<div class="table-wrap"><table>
+  <tr><th>平台</th><th>目标</th><th>说明</th></tr>
+  <tr><td>macOS</td><td><code>aarch64-apple-darwin</code></td><td>Apple Silicon，当前发行基线 macOS 27.0.1；需 Xcode 或 Command Line Tools、Apple Clang、macOS SDK 与系统 linker</td></tr>
+  <tr><td>Linux</td><td><code>x86_64-unknown-linux-gnu</code> / <code>x86_64-unknown-linux-musl</code></td><td>GNU 宿主包提供两套目标资源；当前基线 glibc 2.43 / musl 1.2.5。需 GCC、GNU ld 与开发文件，构建 musl 程序另需 musl-gcc 和匹配的开发文件</td></tr>
+</table></div>
+<p>版本基线以随包说明及<a href="https://github.com/windoze/scoop/blob/main/scripts/release.toml">发行配置</a>为准；GNU 宿主命令不保证在纯 musl 系统运行。使用 <code>scoop.asyncio</code> 的 Linux 程序还要求内核 6.1 及实际可用的 io_uring 能力；这一要求不适用于所有 Scoop 程序。</p>
+
+<ol class="steps">
+  <li><strong>解压工具包</strong>
+    <p>工具包 <code>scoop-&lt;version&gt;-&lt;host&gt;.tar.xz</code> 的顶层直接就是安装根，解压到 <code>~/.scoop</code> 即可：</p>
+<pre><code class="language-sh">$ mkdir -p ~/.scoop
+$ tar -xJf scoop-&lt;version&gt;-aarch64-apple-darwin.tar.xz -C ~/.scoop</code></pre>
+  </li>
+  <li><strong>加入 PATH</strong>
+<pre><code class="language-sh"># ~/.zshrc 或 ~/.bashrc
+export PATH="$HOME/.scoop/bin:$PATH"</code></pre>
+  </li>
+  <li><strong>确认安装</strong>
+<pre><code class="language-sh">$ scoop --version
+scoop &lt;version&gt; (&lt;revision&gt;)</code></pre>
+    <p><code>scoop</code> 会自动把自身所在的安装根作为 sysroot；如需使用其他位置，可设置 <code>SCOOP_SYSROOT</code> 或传入 <code>--sysroot</code>。</p>
+  </li>
+</ol>
+
+<p>安装根的目录结构：</p>
+<pre><code>~/.scoop/
+  VERSION
+  toolchain.toml        工具包内容与目标信息
+  bin/                  scoop、scoopc、scoop-link、scoop-lsp、scoop-pm、lldb、lldb-dap
+  commands/             scoop-example 等外部子命令
+  lib/&lt;target-triple&gt;/  预编译 .slib、原生静态库、运行时
+  libexec/lldb/         调试器配套 Python 与平台 helper
+  include/              公开的 Scoop C 头文件
+  src/                  全部内置 Cone 的源码与示例
+  share/scoop/examples/ 离线示例索引与正文
+  docs/                 标准库 API 文档，按目标区分
+  tooling/              VS Code 扩展与 Scoop 编程 skill</code></pre>
+
+<div class="callout">
+  <strong>从源码构建</strong>
+  <p>Scoop 仍处于开发预览阶段。你也可以从 <a href="https://github.com/windoze/scoop">GitHub 仓库</a> 构建完整工具包：先按<a href="https://github.com/windoze/scoop/blob/main/scripts/README.md">脚本说明</a>准备 Python 3.12+ 及开发文件、SWIG 4、Ninja、Rust、C/C++ 工具链、CMake、Make、Perl、Node.js 22.18+ 与 npm，再执行 <code>python3 scripts/package_toolchain.py --jobs 6</code>。归档生成在 <code>tmp/dist</code> 下。</p>
+</div>
+
+<h2 id="hello">第一个程序</h2>
+<p>新建 <code>hello.scoop</code>：</p>
+{{example hello nooutput}}
+<p>直接运行这个文件：</p>
+<pre><code class="language-sh">$ scoop run hello.scoop --release
+Hello, Scoop!</code></pre>
+<p>单文件程序默认依赖 <code>scoop.core</code> 与 <code>scoop.std</code>，不读取旁边的 <code>Cone.toml</code>；编译产物放在当前目录的 <code>target/</code> 下。<code>--release</code> 启用优化。建议总是用 <code>--</code> 分隔 Scoop 选项与程序参数，例如 <code>scoop run hello.scoop --release -- Ada</code>；程序的 <code>args[0L]</code> 是启动路径，用户参数从 <code>args[1L]</code> 开始。</p>
+
+<h3 id="single-file-deps">单文件依赖</h3>
+<p>单文件程序在文件头部用 <code>//! dep:</code> 声明额外依赖的精确坐标，从预编译产物中查找，例如使用 JSON 库。单文件入口不参与 PM 的版本求解；需要 Git/registry、源码依赖或 workspace 时使用 Cone 项目。</p>
+{{example json}}
+<p>文件首行也可以是 <code>#!</code> 解释器注释，因此 Scoop 文件能直接作为脚本执行：</p>
+<pre><code class="language-scoop">#!/usr/bin/env -S scoop run --release
+fun main() {
+    println("I am a script")
+}</code></pre>
+
+<h2 id="project">创建项目</h2>
+<p>Scoop 的模块、包与发布单元叫做 <strong>Cone</strong>。用 <code>scoop new</code> 创建一个可执行 Cone：</p>
+<pre><code class="language-sh">$ scoop new --group dev.example hello
+created hello
+$ cd hello
+$ scoop run --release
+Hello, Scoop!</code></pre>
+<p>生成的结构如下：</p>
+<pre><code>hello/
+  Cone.toml          Cone 清单
+  src/main.scoop     生产源码
+  tests/basic.scoop  测试源码（只在 scoop test 时编译）</code></pre>
+
+<div class="codeblock"><div class="filename">src/main.scoop</div><pre><code class="language-scoop">package dev.example
+
+fun main() {
+    println(greeting())
+}
+
+fun greeting(): String = "Hello, Scoop!"</code></pre></div>
+
+<div class="codeblock"><div class="filename">tests/basic.scoop</div><pre><code class="language-scoop">package dev.example
+
+import scoop.test.*
+
+@Test
+private class BasicTests {
+    @Test
+    fun `greeting is ready`() {
+        assertEquals("Hello, Scoop!", greeting())
+    }
+}</code></pre></div>
+
+<pre><code class="language-sh">$ scoop test --release
+hello
+  dev.example.BasicTests [passed]
+    greeting is ready (tests/basic.scoop:7:5) passed (4000 ns)
+1 containers, 1 tests: 1 passed, 0 failed, 0 ignored, 0 not run</code></pre>
+
+<p>使用 <code>--kind library</code> 创建库 Cone，<code>--no-tests</code> 省略示例测试。</p>
+
+<h2 id="manifest">Cone.toml 与依赖</h2>
+<p>Cone 自身用完整 <code>group:name:version</code> 标识；依赖可以声明版本要求，由独立包管理器解析，再用 <code>Cone.lock</code> 固定精确版本与来源。下面是仅依赖内置库、可以直接使用的清单：</p>
+<div class="codeblock"><div class="filename">Cone.toml</div><pre><code class="language-toml">schema = 1
+
+[cone]
+group = "dev.example"
+name = "my-app"
+version = "0.1.0"
+kind = "executable"
+
+[dependencies]
+"scoop:scoop.std" = "=0.1.0"
+"scoop:scoop.json" = "=0.1.0"
+
+[test-dependencies]
+"scoop:scoop.test" = "=0.1.0"</code></pre></div>
+<p><code>"1.4.0"</code> 和 <code>"^1.4.0"</code> 都表示 <code>&gt;=1.4.0, &lt;2.0.0</code>；<code>"=1.4.0"</code> 才是精确版本。<code>~1.4.2</code> 和比较项交集也可使用；<code>0.x</code> 的兼容范围按首个非零版本段收窄。不能写 <code>latest</code>、通配符或省略版本段。</p>
+<p>在 <code>[dependencies]</code> 中还可以按实际来源加入以下条目；示例目录、仓库和 registry 地址须替换成自己的输入：</p>
+<pre><code class="language-toml">"dev.example:util" = { version = "0.2.0", path = "../util" }
+"org.example:http" = { version = "1.2.0", github = "example/http", tag = "v1.2.0" }
+"org.example:json" = { version = "1.4.0", registry = "https://packages.example.org/" }
+"org.acme:codec" = { version = "=1.0.0", artifact = "../artifacts/codec.slib" }</code></pre>
+<ul>
+  <li><code>path</code> 指向另一个源码 Cone，<code>scoop</code> 会一并构建；</li>
+  <li><code>github</code>/<code>git</code> 指定 Git 来源，<code>branch</code>/<code>tag</code>/<code>rev</code> 选择引用，lock 固定实际 commit；</li>
+  <li><code>registry</code> 指向静态 HTTP(S) registry；PM 选择版本、下载源码后交给构建工具；</li>
+  <li><code>artifact</code> 指向预编译的 <code>.slib</code> 产物；</li>
+  <li>未指定来源的 <code>scoop</code> group 使用 sysroot；其他 group 使用已配置的默认 registry，没有默认值就报错；</li>
+  <li><code>[test-dependencies]</code> 只参与测试构建，不进入生产产物。</li>
+</ul>
+<p>普通构建会自动解析并生成或更新必要的 lock 记录，优先保留相容的已有选择。可以把 <code>Cone.lock</code> 提交到版本库，在 CI 使用 <code>--locked</code>，或在依赖已准备时用 <code>--frozen</code> 同时禁止联网：</p>
+<pre><code class="language-sh">$ scoop pm resolve
+$ scoop pm deps
+$ scoop build --release --locked
+$ scoop pm update</code></pre>
+<p>Git/registry 源码默认缓存在 <code>~/.scoop/packages/</code>。多 Cone 项目可以使用 <code>[workspace]</code>，通过 <code>-p group:name</code> 选择成员，或用 <code>scoop build --workspace</code> / <code>scoop test --workspace</code> 处理全部成员；<code>run</code> 必须选中唯一可执行 Cone。规则见<a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-PACKAGE-SPEC.md">包管理规范</a>。维护 registry 的步骤见<a href="../guides/registry.html">发布指南</a>；目前已交付消费端，打包与索引维护命令仍属后续计划。</p>
+<p>Cone 还可以携带 C/C++ 源码与原生系统库，用于编写 FFI 绑定，详见<a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-SPEC.md">语言规范</a> 12.2 节。</p>
+
+<h2 id="commands">命令速查</h2>
+<div class="table-wrap"><table>
+  <tr><th>命令</th><th>作用</th></tr>
+  <tr><td><code>scoop new &lt;path&gt; --group &lt;g&gt;</code></td><td>用固定模板创建可执行或库 Cone</td></tr>
+  <tr><td><code>scoop pm &lt;command&gt;</code></td><td>管理 workspace、依赖与锁文件；支持 add/remove、resolve/fetch/update、deps 等</td></tr>
+  <tr><td><code>scoop build [root]</code></td><td>从 Cone 或单个源文件构建可执行文件或库；<code>-o</code> 指定输出，<code>--emit ast|hir|mir|lir|all --dump-dir DIR</code> 导出中间表示</td></tr>
+  <tr><td><code>scoop run [root] [args…]</code></td><td>构建并运行可执行文件，继承调用者的环境变量和标准输入输出</td></tr>
+  <tr><td><code>scoop test</code></td><td>构建并运行当前 Cone 的测试</td></tr>
+  <tr><td><code>scoop fmt [inputs…]</code></td><td>格式化 Cone 或指定源码；<code>--check</code> 只报告格式差异</td></tr>
+  <tr><td><code>scoop check [root]</code></td><td>完成前端检查，不生成根 Cone 的机器产物；<code>--tests</code> 检查测试用途</td></tr>
+  <tr><td><code>scoop doc [roots…]</code></td><td>从文档注释生成离线 API 文档站点</td></tr>
+  <tr><td><code>scoop link</code></td><td>不编译源码，只链接已有产物</td></tr>
+  <tr><td><code>scoop clean [root]</code></td><td>移除选定 target 目录中的所有 profile 与构建缓存</td></tr>
+  <tr><td><code>scoop example [topic]</code></td><td>查询离线示例；支持 <code>--list</code> 与 <code>--search</code></td></tr>
+  <tr><td><code>scoop &lt;other&gt;</code></td><td>运行 <code>&lt;sysroot&gt;/commands/scoop-&lt;other&gt;</code> 外部子命令</td></tr>
+</table></div>
+<p>常用选项：<code>--release</code>（优化构建）、<code>--target &lt;triple&gt;</code>（交叉目标）、<code>--target-dir</code>（输出目录）、<code>-j</code>（并发编译进程数）、<code>--message-format json</code>（机器可读诊断）。</p>
+
+<h2 id="editor">编辑器支持</h2>
+<p>工具包附带 VS Code 扩展，提供 Tree-sitter 语法高亮、折叠、缩进，以及通过 <code>scoop-lsp</code> 提供的诊断、补全、悬停文档、签名帮助、跳转、引用、重命名和快速修复：</p>
+<pre><code class="language-sh">$ code --install-extension ~/.scoop/tooling/scoop-language-support-*.vsix</code></pre>
+<p>扩展会依次查找 <code>scoop.server.path</code> 设置、<code>~/.scoop/bin/scoop-lsp</code> 与 PATH 中的 <code>scoop-lsp</code>。Tree-sitter 语法包（<code>tree-sitter-scoop</code>）也可以单独用于其他支持 Tree-sitter 的编辑器。</p>
+<p>编辑器消费已有的锁定依赖，不自动更新版本或下载源码。缺少 lock 或依赖时，在项目目录运行 <code>scoop pm resolve</code> 或 <code>scoop pm fetch</code>，再继续分析。</p>
+
+<h3 id="debugging">源码调试</h3>
+<p>工具包附带 <code>lldb</code> 与 <code>lldb-dap</code>。在 VS Code 中按 F5 选择 Scoop，或运行 <code>Scoop: Debug Current File</code>，可自动构建并启动调试；也支持调试测试和附加现有进程。</p>
+<pre><code class="language-sh">$ scoop build --release --debug-info full</code></pre>
+<p>调试文件随程序输出：macOS 使用 <code>.dSYM</code>，Linux 使用 <code>.debug</code>。debug 构建默认包含完整调试信息，release 默认不包含；异常与 trap 可以显示物理栈及源码位置。当前不提供完整 Scoop 表达式求值或协程逻辑栈，配置方法见<a href="https://github.com/windoze/scoop/blob/main/tooling/vscode-scoop/README.md#原生调试">调试说明</a>。</p>
+
+<h2 id="next">下一步</h2>
+<ul>
+  <li><a href="../guides/language-basics.html">语言基础</a>：从单文件开始完成文本统计程序；</li>
+  <li><a href="tour.html">语言导览</a>：系统了解 Scoop 的语法和类型系统；</li>
+  <li><a href="kotlin.html">对比 Kotlin</a>：如果你熟悉 Kotlin，这里列出了所有需要注意的差异；</li>
+  <li><a href="stdlib.html">标准库</a>：浏览随工具链发布的库和示例；</li>
+  <li><code>scoop example --list</code> 列出离线主题；库示例位于 <code>~/.scoop/src/&lt;cone&gt;/examples</code>。</li>
+</ul>

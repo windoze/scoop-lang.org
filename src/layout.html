@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  <meta name="description" content="{{description}}">
+  <meta property="og:title" content="{{title}}">
+  <meta property="og:description" content="{{description}}">
+  <link rel="icon" href="{{root}}assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="{{root}}assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="{{root}}index.html"><img src="{{root}}assets/logo.svg" alt="">Scoop</a>
+      <button class="nav-toggle" type="button" aria-label="菜单">☰</button>
+      <nav class="nav">
+        {{nav}}
+        <a class="gh" href="https://github.com/windoze/scoop">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+{{content}}
+  </main>
+  <footer class="site-footer">
+    <div class="inner">
+      <div>© Scoop 项目贡献者 · 静态类型、编译到原生代码的编程语言</div>
+      <div class="links">
+        <a href="{{root}}docs/install.html">快速开始</a>
+        <a href="{{root}}guides/index.html">用户指南</a>
+        <a href="{{root}}docs/tour.html">语言导览</a>
+        <a href="{{root}}docs/stdlib.html">标准库</a>
+        <a href="{{root}}api/index.html">API 文档</a>
+        <a href="https://github.com/windoze/scoop">源码</a>
+        <a href="https://github.com/windoze/scoop/tree/main/docs/specs">语言规范</a>
+      </div>
+    </div>
+  </footer>
+  <script src="{{root}}assets/site.js"></script>
+</body>
+</html>

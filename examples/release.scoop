@@ -1,0 +1,40 @@
+@Extern(name = "malloc")
+fun nativeMalloc(size: ULong): Ptr<Unit>
+
+@Extern(name = "free")
+fun nativeFree(address: Ptr<Unit>)
+
+final class NativeOwner public constructor(private var handle: Option<Ptr<Unit>>): Closeable {
+    public override fun close() {
+        val owned = handle
+        handle = None
+        when (owned) {
+            case Some(value) -> @Unsafe
+            {
+                nativeFree(value)
+            }
+            case None -> {}
+        }
+    }
+
+    release {
+        when (handle) {
+            case Some(value) -> @Unsafe
+            {
+                nativeFree(value)
+            }
+            case None -> {}
+        }
+    }
+}
+
+fun main() {
+    var p: Ptr<Unit>? = None
+    @Unsafe
+    {
+        p = Some(nativeMalloc(64uL))
+    }
+    val owner = NativeOwner(p)
+    owner.use { println("using native resource") }
+    println("closed")
+}

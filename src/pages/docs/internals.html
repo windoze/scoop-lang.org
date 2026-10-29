@@ -1,0 +1,90 @@
+<!-- title: 架构; nav: internals; layout: docs; description: Scoop 编译器与运行时的整体架构：Rust 编写的多阶段编译器、LLVM 后端、.slib 产物、C 运行时与分代 Immix GC。 -->
+<h1>编译器与运行时架构</h1>
+<p class="intro">Scoop 的编译器用 Rust 编写，经过 AST → HIR → MIR → LIR 四层 IR，再由 LLVM 生成原生对象代码；运行时用 C 编写，提供精确移动 GC、异常展开、协程与 FFI 支持。本页概述各组成部分及其职责。</p>
+
+<h2 id="pipeline">编译流水线</h2>
+<div class="pipeline">
+  <div class="stage"><b>源码</b><small>.scoop</small></div><span class="arrow">→</span>
+  <div class="stage"><b>AST</b><small>parser</small></div><span class="arrow">→</span>
+  <div class="stage"><b>HIR</b><small>名称解析 · 类型检查</small></div><span class="arrow">→</span>
+  <div class="stage"><b>MIR</b><small>CFG · 单态化后</small></div><span class="arrow">→</span>
+  <div class="stage"><b>LIR</b><small>布局 · GC 操作</small></div><span class="arrow">→</span>
+  <div class="stage"><b>LLVM</b><small>codegen</small></div><span class="arrow">→</span>
+  <div class="stage"><b>.slib</b><small>/ 可执行文件</small></div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>阶段</th><th>职责</th></tr>
+  <tr><td><b>Parser / AST</b></td><td>保留原始源码顺序、byte span、显式类型实参、各种实参形式以及声明、表达式、模式与控制转移结构。可恢复的语法分析同时服务于语言服务。</td></tr>
+  <tr><td><b>HIR</b></td><td>名称解析、重载决议、类型推断与检查、smart cast、可见性、穷尽性、effect（suspend / NoGC / unsafe）检查。输出导出模板（供下游 Cone 实例化泛型）与本 Cone 的具体化 HIR。</td></tr>
+  <tr><td><b>MIR</b></td><td>只接收已具体化的 HIR；每个表达式具有精确类型，调用与短路求值展开为 CFG，并严格保持求值顺序。协程状态机、闭包环境、装箱在此层显式化。</td></tr>
+  <tr><td><b>LIR</b></td><td>以完整操作表达托管分配、字段/数组写入、值复制、原子访问、safepoint poll 与 release 发布，携带实际类型、布局、GC effect 和 live set。</td></tr>
+  <tr><td><b>Codegen</b></td><td>通过 inkwell 调用外部 LLVM 22.1：内联分配与写屏障快路径、statepoint 与 stackmap、异常 landing pad、接口派发表与 C ABI 桥接，生成目标对象代码。</td></tr>
+</table></div>
+<p>每个阶段 crate 只依赖自己的输入/输出 IR crate，不依赖上游阶段的实现；阶段之间的编排由 driver 负责。IR 的数据结构在结构上保证完备——例如表达式的类型信息不可能缺失——而不是依赖后续检查兜底。全局实体都有类型化的唯一 id：泛型函数、已解析类型参数的泛型函数与单态化后的函数是三种不同的实体类型。</p>
+
+<h2 id="tools">工具组成</h2>
+<div class="table-wrap"><table>
+  <tr><th>命令</th><th>职责</th></tr>
+  <tr><td><code>scoop</code></td><td>面向用户的工具入口：从 PM 取得精确依赖图和本地输入，判断更新并调度构建、链接与测试，同时提供格式化、前端检查和文档生成。</td></tr>
+  <tr><td><code>scoop-pm</code> / <code>scoop pm</code></td><td>独立包管理器：读取 Cone/workspace 清单，解析版本要求，取得 Git/registry 源码，维护 <code>Cone.lock</code>，向构建工具提供精确图。自身不依赖 LLVM。</td></tr>
+  <tr><td><code>scoopc</code></td><td>单 Cone 编译器：一次只编译一个 Cone，只消费命令行显式给出的依赖产物，不读取上游源码。</td></tr>
+  <tr><td><code>scoop-link</code></td><td>把一组 <code>.slib</code> 产物与运行时链接成可执行文件。</td></tr>
+  <tr><td><code>scoop-lsp</code></td><td>语言服务器，复用编译器前端的语义查询，提供诊断、补全、导航和重构。</td></tr>
+  <tr><td><code>scoop example</code></td><td>随工具链分发的外部子命令，按主题或关键词查询离线示例。</td></tr>
+  <tr><td><code>lldb</code> / <code>lldb-dap</code></td><td>随工具包分发的原生调试器与 VS Code 调试适配器，读取编译器生成的调试信息与 Scoop 类型展示。</td></tr>
+</table></div>
+
+<h2 id="slib">.slib 产物与缓存</h2>
+<p>每个 Cone 编译为一个 <code>.slib</code>：目标相关、按位可复现的 ar 归档，首项是 Zstandard 压缩的 CBOR manifest，其余成员保存 HIR/MIR/LIR 元数据与目标对象代码。下游 Cone 通过 <code>.slib</code> 中的导出模板实例化泛型、内联跨 Cone 函数，而不需要重新读取依赖的源码。</p>
+<ul>
+  <li>Cone 身份由完整的 <code>group:name:version</code> 坐标决定，产物另有内容指纹；</li>
+  <li>版本要求在编译前由 PM 解析并写入 <code>Cone.lock</code>；<code>scoopc</code>、链接器与 runtime 消费静态精确图，不再求解版本；</li>
+  <li>一个最终程序内，同一个 <code>group:name</code> 只有一个版本和一个来源；workspace 中不同根程序可以有不同选择；</li>
+  <li>缓存只判断“输入是否变化”：未变化且结果存在时直接复用，不回读产物做额外复核；</li>
+  <li>标准库以预编译 <code>.slib</code> 随工具链发布，普通应用不需要重新编译它们。</li>
+</ul>
+<p>源码缓存与编译缓存分别管理：Git/registry 源码默认共享在 <code>~/.scoop/packages/</code>，构建结果保存在项目输出和 Cone 构建缓存中。普通构建优先复用相容的锁定选择；<code>scoop pm update</code> 请求更新版本，<code>--locked</code> 禁止改变锁定选择，<code>--frozen</code> 同时禁止联网。详见<a href="install.html#manifest">Cone.toml 与依赖</a>及<a href="../guides/registry.html">registry 指南</a>。</p>
+
+<h2 id="objects">对象模型</h2>
+<ul>
+  <li>托管引用是指向对象起点的直接指针，对象可能被 GC 移动；对象头固定 16 字节：TypeDescriptor 指针 + GC 状态字；</li>
+  <li>接口值是双字的 <code>{ object, itab }</code>：itab 指向实际类型对该接口的完整槽表，接口调用直接读取槽位，不在运行时查目录；</li>
+  <li>class、<code>Any</code>、<code>String</code>、数组与函数值是单字引用；</li>
+  <li>值类型内联存储，转为引用类型时装箱；零尺寸类型（ZST）不占存储，但保留类型身份；</li>
+  <li><code>Option</code> 利用 niche 表示：引用、<code>Ptr</code>、<code>FunPtr</code> 的 <code>None</code> 用空指针表示，不需要额外的 tag。</li>
+</ul>
+
+<h2 id="gc">垃圾回收</h2>
+<p>运行时实现<strong>精确、移动、分代</strong>的 Immix 风格收集器：</p>
+<ul>
+  <li><strong>精确根</strong>：编译器通过 LLVM statepoint 与 stackmap 记录每个 safepoint 上存活的引用，GC 后按 stackmap 更新重定位；</li>
+  <li><strong>分配</strong>：线程本地 TLAB 中 bump 分配，快路径由 codegen 内联；对象按 Immix 的 block / line 组织；</li>
+  <li><strong>分代</strong>：minor collection 处理年轻代，借助卡表写屏障追踪旧代到年轻代的引用；full collection 处理整个堆，并按回收收益选择 region 进行搬迁整理；</li>
+  <li><strong>并行标记</strong>：stop-the-world 后由常驻 worker 线程并行 mark；</li>
+  <li><strong>分片收集</strong>：默认对旧代压力触发的 full collection 分片标记，片间恢复程序执行；minor 默认完整收集。分片期间不搬迁对象，标记线程不与程序并发读取普通对象字段；</li>
+  <li><strong>pin 与 handle</strong>：FFI 期间可以 pin 对象或持有 handle，被 pin 的对象不移动；</li>
+  <li><strong>release hook</strong>：带 <code>release</code> 块的对象在回收前尽力调用一次 GC-free 的清理逻辑。</li>
+</ul>
+<p>调试 GC 时可以用 <code>scoop --enable-gc-stress run …</code> 链接 stress 版本的运行时，再在运行时设置 <code>SCOOP_GC_STRESS_MOVE=1</code> 或 <code>SCOOP_GC_STRESS_MINOR=1</code> 开启移动或 minor 收集的压力模式；<code>--enable-startup-stats</code> 输出启动计时与元数据统计。</p>
+
+<h2 id="runtime">运行时的其他职责</h2>
+<ul>
+  <li><strong>异常</strong>：基于原生 unwind 的 personality 与 landing pad，catch 时物化托管异常对象；</li>
+  <li><strong>初始化</strong>：object / companion 单例与全局初始化按初始化单元一次性执行，失败会被缓存；</li>
+  <li><strong>线程</strong>：mutator 线程登记、safepoint 握手、native 状态切换；</li>
+  <li><strong>协程与 Context</strong>：协程帧与续体由编译器生成，运行时负责 task-local Context 的绑定与传播；</li>
+  <li><strong>FFI 支持</strong>：Scoop ABI 的 runtime functions（分配、root、pin、handle、托管回调）与 C 头文件 <code>scoop_rt.h</code>。</li>
+</ul>
+<p>运行时不重新进行名称解析、重载选择或泛型实例化——这些都在编译期完成。</p>
+<p>异步 I/O 驱动属于普通库 <code>scoop.asyncio</code>。<code>PlatformEventLoop</code> 在 Darwin 使用系统 libdispatch，在 Linux 使用 io_uring/liburing；任务树复用 core 的 Job/CoroutineScope。原生 callback 与 worker 只产生完成记录，由所属事件循环推进 I/O continuation；宿主主循环可通过 <code>attach</code> 接入。它不增加编译器内建调度器或新的 runtime ABI。</p>
+
+<h2 id="specs">规范文档</h2>
+<p>Scoop 遵循“spec 先行”：语言行为、运行时契约与流水线职责的变更都先修改规范。主要文档（中文）：</p>
+<ul>
+  <li><a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-SPEC.md">语言规范</a>：语法、类型系统、核心库与 FFI；</li>
+  <li><a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-RUNTIME-SPEC.md">运行时规范</a>：对象模型、GC 契约、异常与运行时函数；</li>
+  <li><a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-IMPL-SPEC.md">编译器与产物规范</a>：各阶段的输入输出、实体身份、目标 ABI、<code>.slib</code> 格式与链接契约；</li>
+  <li><a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-PACKAGE-SPEC.md">包管理规范</a>：workspace、版本要求、Git/registry、锁文件与构建接入；</li>
+  <li><a href="https://github.com/windoze/scoop/blob/main/docs/ROADMAP.md">路线图</a>：实现里程碑；</li>
+  <li><a href="https://github.com/windoze/scoop/tree/main/docs/specs">库规范</a>：std、asyncio、HTTP、TLS、JSON、正则、终端等各库的 API 合同。</li>
+</ul>

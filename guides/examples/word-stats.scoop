@@ -1,0 +1,31 @@
+fun longer(left: String, right: String): String =
+    if (left.charLength >= right.charLength) left else right
+
+fun main(args: Array<String>): Int {
+    if (args.size == 1L) {
+        println("Usage: word-stats <word> [word ...]")
+        return 2
+    }
+
+    var words = 0L
+    var scalars = 0L
+    var longest = ""
+    for (index in 1L until args.size) {
+        val word = args[index]
+        if (word.charLength == 0L) continue
+        words += 1L
+        scalars += word.charLength
+        longest = longer(longest, word)
+    }
+
+    if (words == 0L) {
+        println("No non-empty words.")
+        return 2
+    }
+
+    val average = scalars.toDouble() / words.toDouble()
+    println(f"words=${words}, scalars=${scalars}")
+    println(f"longest=${longest}")
+    println(f"average=${average}")
+    return 0
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page.title | escape }} · Scoop 编程语言</title>
+  <meta name="description" content="{{ page.description | default: site.description | escape }}">
+  <meta property="og:title" content="{{ page.title | escape }} · Scoop 编程语言">
+  <meta property="og:description" content="{{ page.description | default: site.description | escape }}">
+  <link rel="canonical" href="{{ page.url | absolute_url }}">
+  <link rel="icon" href="../assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="../index.html"><img src="../assets/logo.svg" alt="">Scoop</a>
+      <button class="nav-toggle" type="button" aria-label="菜单">☰</button>
+      <nav class="nav">
+        <a href="../docs/install.html">快速开始</a>
+        <a class="active" href="{{ '/index.html' | relative_url }}" aria-current="true">用户指南</a>
+        <a href="../docs/tour.html">语言导览</a>
+        <a href="../docs/stdlib.html">标准库</a>
+        <a href="../docs/kotlin.html">对比 Kotlin</a>
+        <a href="../docs/internals.html">架构</a>
+        <a href="../api/index.html">API 文档</a>
+        <a class="gh" href="https://github.com/windoze/scoop">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+  <main class="docs guide">
+    <aside>
+      <h4>用户指南</h4>
+      <ul>
+        {% assign guide_pages = site.pages | where: "guide", true | sort: "order" %}
+        {% for guide_page in guide_pages %}
+        <li><a href="{{ guide_page.url | relative_url }}"{% if page.url == guide_page.url %} class="active" aria-current="page"{% endif %}>{{ guide_page.nav_title | default: guide_page.title | escape }}</a></li>
+        {% endfor %}
+      </ul>
+      <h4>本页内容</h4>
+      <ul class="toc"></ul>
+    </aside>
+    <article>
+      {{ content }}
+    </article>
+  </main>
+  <footer class="site-footer">
+    <div class="inner">
+      <div>© Scoop 项目贡献者 · 静态类型、编译到原生代码的编程语言</div>
+      <div class="links">
+        <a href="{{ '/index.html' | relative_url }}">用户指南</a>
+        <a href="../api/index.html">API 文档</a>
+        <a href="https://github.com/windoze/scoop">源码</a>
+        <a href="https://github.com/windoze/scoop/tree/main/docs/specs">语言规范</a>
+      </div>
+    </div>
+  </footer>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+<!-- title: Scoop; nav: home; description: Scoop 是一门静态类型、编译到原生代码的编程语言：Kotlin 风格的语法，真正的值类型，单态化泛型，LLVM 后端与精确移动 GC。 -->
+<section class="hero">
+  <div>
+    <span class="eyebrow">开发预览 · 0.x</span>
+    <h1>熟悉的语法，<br><span class="grad">原生的性能。</span></h1>
+    <p class="lead">Scoop 是一门静态类型、编译到原生代码的编程语言。它以 Kotlin 的核心语法为基础，加入真正的值类型（<code>struct</code> / <code>enum</code> / tuple）与模式匹配，泛型采用单态化，经 LLVM 生成机器码，并由带分代 Immix GC 的 C 运行时托管内存。</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="docs/install.html">快速开始 →</a>
+      <a class="btn btn-ghost" href="docs/tour.html">语言导览</a>
+    </div>
+    <div class="meta">支持 macOS (AArch64) 与 Linux (x86-64，glibc / musl) · LLVM 22.1</div>
+  </div>
+  <div>
+    {{example hero}}
+  </div>
+</section>
+
+<section class="section band">
+  <h2>为什么选择 Scoop</h2>
+  <p class="sub">保留 Kotlin 优雅、表达力强的写法，去掉平台包袱，换来可预测的内存布局与原生二进制。</p>
+  <div class="grid grid-3">
+    <div class="card"><div class="icon">🧊</div><h3>真正的值类型</h3><p><code>struct</code>、带载荷的 <code>enum</code> 和 tuple 都是不可变、无 identity 的值，内联存储、按值复制，数组中连续排布，不再为小对象付出堆分配的代价。</p></div>
+    <div class="card"><div class="icon">🧩</div><h3>强大的模式匹配</h3><p><code>when</code> 支持 enum 变体、tuple、struct 的嵌套解构、guard 与穷尽性检查，未覆盖的情况在编译期给出可读的反例。</p></div>
+    <div class="card"><div class="icon">🛡️</div><h3>没有 null</h3><p><code>T?</code> 是 <code>Option&lt;T&gt;</code> 的语法糖，<code>?.</code>、<code>?:</code>、<code>!!</code> 照常可用；<code>T??</code> 与 <code>T?</code> 是不同类型，语义精确。</p></div>
+    <div class="card"><div class="icon">⚡</div><h3>单态化泛型 + LLVM</h3><p>每组具体类型实参生成专门代码，避免类型擦除带来的装箱；LLVM 后端完成优化并支持跨 Cone 内联。值转换为接口或 <code>Any</code> 时仍按语言规则装箱。</p></div>
+    <div class="card"><div class="icon">♻️</div><h3>精确移动 GC</h3><p>C 运行时提供精确根、写屏障与分代 Immix 收集；原生资源通过 <code>close</code>、<code>use</code> 或 <code>useAsync</code> 确定性关闭，<code>release</code> 块提供尽力而为的回收清理。</p></div>
+    <div class="card"><div class="icon">🔌</div><h3>直接的 C FFI</h3><p><code>@Extern</code> 绑定 C 函数和全局变量，<code>@CLayout</code>、<code>Ptr&lt;T&gt;</code>、<code>FunPtr&lt;F&gt;</code> 描述原生内存，<code>@Unsafe</code> 明确标出不安全边界。</p></div>
+  </div>
+</section>
+
+<section class="section">
+  <h2>写起来是这样的</h2>
+  <p class="sub">以下每段代码都用当前工具链实际编译运行过。</p>
+  <div class="showcase">
+    <div class="tabs">
+      <button class="tab active" type="button"><strong>Hello, Scoop</strong><span>最小的程序</span></button>
+      <button class="tab" type="button"><strong>值类型与解构</strong><span>struct、副本更新、tuple</span></button>
+      <button class="tab" type="button"><strong>Option</strong><span>没有 null 的空安全</span></button>
+      <button class="tab" type="button"><strong>JSON</strong><span>类型化 codec</span></button>
+      <button class="tab" type="button"><strong>异步 HTTP 服务</strong><span>结构化并发 + 平台事件循环</span></button>
+      <button class="tab" type="button"><strong>测试</strong><span>scoop test</span></button>
+    </div>
+    <div>
+      <div class="panel active">{{example hello nooutput}}
+<pre><code class="language-sh">$ scoop run hello.scoop --release
+Hello, Scoop!</code></pre></div>
+      <div class="panel">{{example structs}}</div>
+      <div class="panel">{{example options}}</div>
+      <div class="panel">{{example json}}</div>
+      <div class="panel">{{example http_server nooutput}}
+<pre><code class="language-sh"># Terminal 1
+$ scoop run --release http_server.scoop
+
+# Terminal 2
+$ curl 'http://127.0.0.1:8080/greet?name=Scoop'
+{"message":"Hello, Scoop!"}</code></pre></div>
+      <div class="panel">
+<div class="codeblock"><div class="filename">tests/calculator.scoop</div><pre><code class="language-scoop">package examples.testing
+
+import scoop.test.*
+
+@Test
+private class CalculatorTests {
+    @Test
+    fun `division returns a value`() {
+        assertEquals(6, divide(42, 7))
+        assertTrue(divide(42, 7) > 0)
+    }
+
+    @Test
+    fun `zero count reports the reason`() {
+        val error = assertFailsWith&lt;IllegalArgumentException&gt; { divide(42, 0) }
+        assertEquals(Some("count must not be zero"), error.message)
+    }
+}</code></pre></div>
+<pre><code class="language-sh">$ scoop test --release
+assertions
+  examples.testing.CalculatorTests [passed]
+    division returns a value (tests/calculator.scoop:7:5) passed (2000 ns)
+    zero count reports the reason (tests/calculator.scoop:13:5) passed (91000 ns)
+1 containers, 2 tests: 2 passed, 0 failed, 0 ignored, 0 not run</code></pre></div>
+    </div>
+  </div>
+</section>
+
+<section class="section band">
+  <h2>开箱即用的工具链</h2>
+  <p class="sub">一个 <code>scoop</code> 命令覆盖新建、包管理、构建、运行、测试、格式化、检查与文档生成。</p>
+  <div class="grid grid-4">
+    <div class="card"><span class="tag">scoop new</span><h3>新建 Cone</h3><p>生成可执行或库模板，附带示例测试。</p></div>
+    <div class="card"><span class="tag">scoop pm</span><h3>依赖与工作区</h3><p>解析版本要求，获取 Git 与 registry 源码，用 <code>Cone.lock</code> 固定选择。</p></div>
+    <div class="card"><span class="tag">scoop run</span><h3>单文件即跑</h3><p>直接运行 <code>.scoop</code> 文件，用 <code>//! dep:</code> 声明依赖。</p></div>
+    <div class="card"><span class="tag">scoop test</span><h3>内建测试</h3><p><code>@Test</code> 标注、断言库与生命周期钩子。</p></div>
+    <div class="card"><span class="tag">scoop doc</span><h3>API 文档</h3><p>从文档注释生成离线、可搜索的文档站点。</p></div>
+    <div class="card"><span class="tag">scoop build</span><h3>构建产物</h3><p>生成可执行文件或 <code>.slib</code> 库，可用 <code>--emit</code> 导出 AST/HIR/MIR/LIR。</p></div>
+    <div class="card"><span class="tag">scoop fmt / check</span><h3>格式化与检查</h3><p>统一源码格式，完成前端检查；支持检查测试源码。</p></div>
+    <div class="card"><span class="tag">scoop example</span><h3>离线示例</h3><p>按主题或关键词查找完整程序、运行步骤与预期结果。</p></div>
+    <div class="card"><span class="tag">LLDB / VS Code</span><h3>原生调试</h3><p>断点、变量、源码行与异常物理栈；可调试应用和 Cone 测试。</p></div>
+    <div class="card"><span class="tag">scoop-lsp</span><h3>语言服务</h3><p>诊断、补全、跳转、引用、重命名与快速修复。</p></div>
+    <div class="card"><span class="tag">VS Code</span><h3>编辑器扩展</h3><p>Tree-sitter 高亮、折叠、缩进，内置 LSP 客户端。</p></div>
+    <div class="card"><span class="tag">.slib</span><h3>增量与缓存</h3><p>预编译库产物，输入未变化时直接复用。</p></div>
+  </div>
+</section>
+
+<section class="section">
+  <h2>功能完整的标准库</h2>
+  <p class="sub">二十多个随工具链发布的预编译库 Cone，从集合、文本到 TLS、HTTP/2 与终端交互。</p>
+  <div class="grid grid-4">
+    <a class="card" href="docs/stdlib.html#core"><span class="tag">scoop.core / std</span><h3>核心与基础库</h3><p>集合、文本、字节、日期时间、UUID。</p></a>
+    <a class="card" href="docs/stdlib.html#platform"><span class="tag">scoop.asyncio</span><h3>异步 I/O</h3><p><code>PlatformEventLoop</code> 在 macOS 使用 libdispatch，在 Linux 使用 io_uring。</p></a>
+    <a class="card" href="docs/stdlib.html#net"><span class="tag">scoop.http.*</span><h3>HTTP 客户端与服务端</h3><p>HTTP/1.1、HTTP/2、SSE、WebSocket。</p></a>
+    <a class="card" href="docs/stdlib.html#data"><span class="tag">scoop.json</span><h3>数据与编码</h3><p>JSON、正则、URL、字符集、压缩。</p></a>
+    <a class="card" href="docs/stdlib.html#net"><span class="tag">scoop.tls / crypto</span><h3>安全</h3><p>基于 OpenSSL 的 TLS、摘要与 HMAC。</p></a>
+    <a class="card" href="docs/stdlib.html#core"><span class="tag">scoop.math</span><h3>数学</h3><p>标量数学、BigInteger、BigDecimal。</p></a>
+    <a class="card" href="docs/stdlib.html#tools"><span class="tag">scoop.cli / log</span><h3>应用开发</h3><p>声明式命令行解析、日志 facade。</p></a>
+    <a class="card" href="docs/stdlib.html#tools"><span class="tag">scoop.terminal</span><h3>终端</h3><p>ANSI 样式、按键事件、readline。</p></a>
+  </div>
+</section>
+
+<section class="section">
+  <div class="cta">
+    <h2>动手试试</h2>
+    <p>解压工具链、把 <code>~/.scoop/bin</code> 加入 PATH，就可以运行第一个程序。</p>
+    <a class="btn btn-primary" href="docs/install.html">安装 Scoop →</a>
+  </div>
+</section>

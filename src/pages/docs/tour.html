@@ -1,0 +1,158 @@
+<!-- title: 语言导览; nav: tour; layout: docs; description: 通过可运行的示例系统了解 Scoop：值类型、模式匹配、Option、类与接口、泛型、闭包、协程与 FFI。 -->
+<h1>语言导览</h1>
+<p class="intro">这份导览通过一组可运行的小程序介绍 Scoop 的主要特性。每段代码都附有实际运行输出，你可以把它保存为 <code>.scoop</code> 文件，用 <code>scoop run</code> 运行。如果你熟悉 Kotlin，大部分语法会很眼熟；差异集中整理在<a href="kotlin.html">对比 Kotlin</a>一页。</p>
+
+<h2 id="basics">基础</h2>
+<p>程序从 <code>fun main()</code> 开始。<code>val</code> 声明不可重新赋值的绑定，<code>var</code> 声明可变变量；类型可以省略，由编译器推断。<code>if</code>、<code>when</code> 和 <code>try</code> 都是表达式。</p>
+{{example basics}}
+<ul>
+  <li>字符串插值只在 <strong>f-string</strong> 中生效：<code>f"…${expr}…"</code>，花括号不能省略；普通字符串里的 <code>$</code> 就是普通字符。</li>
+  <li><code>"""…"""</code> 与 <code>f"""…"""</code> 是保留换行的 raw 字符串。</li>
+  <li><code>1..3</code> 是闭区间，<code>0 until n</code> 是半开区间。</li>
+</ul>
+
+<h3 id="numbers">数值类型</h3>
+<p>整数有八种定宽表示：<code>Int8</code>/<code>Int16</code>/<code>Int</code>/<code>Long</code> 与对应的无符号 <code>UInt8</code>/<code>UInt16</code>/<code>UInt</code>/<code>ULong</code>，<code>Int</code> 在所有目标上固定 32 位，<code>Long</code> 固定 64 位；<code>Byte</code>、<code>Short</code>、<code>Int64</code> 等是透明别名。浮点数有 <code>Float</code> 与 <code>Double</code>。</p>
+<ul>
+  <li>字面量：<code>42</code>、<code>42L</code>、<code>42u</code>、<code>42uL</code>、<code>0xFF</code>、<code>0b1010</code>、<code>1_000_000</code>；</li>
+  <li>不同宽度或符号的整数之间<strong>不做隐式提升</strong>，需要显式调用 <code>toLong()</code>、<code>toUInt()</code> 等；</li>
+  <li>算术溢出按二进制补码回绕，不抛异常；整数除零抛出 <code>ArithmeticException</code>；</li>
+  <li>集合长度和下标使用 <code>Long</code>，例如 <code>names[0L]</code>、<code>text.charLength</code>。</li>
+</ul>
+
+<h2 id="structs">struct：值类型</h2>
+<p><code>struct</code> 是不可变的聚合值类型：没有 identity，按值复制，作为字段或数组元素时内联存储。字段在主构造函数中用 <code>val</code> 声明，可以带默认值，构造时可以使用命名参数。</p>
+{{example structs}}
+<ul>
+  <li><strong>副本更新</strong> <code>p.{ y: 10 }</code> 基于已有值创建修改了部分字段的新值，原值不变；</li>
+  <li>struct 自动获得逐字段的结构相等 <code>==</code>；值类型上使用 <code>===</code> 是编译错误；</li>
+  <li><strong>解构</strong>可以按位置 <code>val (x, y) = p</code>，也可以按字段名 <code>val Config { host, port, .. } = config</code>，<code>..</code> 忽略其余字段；</li>
+  <li>tuple 是匿名的积类型：<code>(1, "one")</code>，通过 <code>._1</code>、<code>._2</code> 或解构访问；<code>()</code> 就是 <code>Unit</code>，1 元 tuple 写作 <code>(e,)</code>；</li>
+  <li><code>ToString</code>、<code>Hash</code> 不会自动派生，需要像上面那样显式实现。</li>
+</ul>
+
+<h2 id="enums">enum 与模式匹配</h2>
+<p>Scoop 的 <code>enum</code> 是带载荷的代数数据类型（类似 Rust）。变体可以没有载荷、携带位置参数，或携带命名字段。<code>when</code> 中以 <code>case</code> 开头的分支使用模式语义，可以嵌套匹配 enum、tuple 和 struct，并用 <code>if</code> 添加 guard。</p>
+{{example enums}}
+<ul>
+  <li>在 <code>case</code> 中，变体名可以省略 <code>Shape.</code> 前缀，由 subject 的类型解析；</li>
+  <li>含 <code>case</code> 的 <code>when</code> 必须<strong>穷尽</strong>，否则编译器会报错并给出一个未覆盖的示例；带 guard 的分支不计入覆盖；</li>
+  <li><code>enum Status: Int { … }</code> 声明<strong>整型枚举</strong>：每个变体有显式数值，可以按值上转为 <code>Int</code>，但整数不能隐式转回枚举；</li>
+  <li>变体不是类型，不能用于 <code>is</code> 检查或作为变量类型，提取载荷一律通过 <code>when</code>。</li>
+</ul>
+
+<h2 id="option">Option：没有 null</h2>
+<p>Scoop 没有运行期 <code>null</code>。<code>T?</code> 只是核心库 <code>enum Option&lt;T&gt; { Some(T), None }</code> 的语法糖，Kotlin 的空安全运算符照常使用：</p>
+{{example options}}
+<ul>
+  <li><code>a?.b</code>：<code>a</code> 为 <code>Some(v)</code> 时得到 <code>Some(v.b)</code>，否则为 <code>None</code>；</li>
+  <li><code>a ?: b</code>：取 <code>Some</code> 的载荷，否则求值 <code>b</code>（可以是 <code>return</code> 或 <code>throw</code>）；</li>
+  <li><code>a!!</code>：取载荷，<code>None</code> 时抛出 <code>UnwrapException</code>；</li>
+  <li>可空是逐层的：<code>T??</code> 是 <code>Option&lt;Option&lt;T&gt;&gt;</code>，<code>Some(None)</code> 与 <code>None</code> 可以区分；安全调用<strong>不会展平</strong>结果；</li>
+  <li><code>Option</code> 是普通 enum，可以直接在 <code>when</code> 里深度匹配，例如 <code>case Some(User { email: Some(addr), .. })</code>。</li>
+</ul>
+
+<h2 id="classes">类、接口与对象</h2>
+<p>类、接口、<code>object</code> 和 <code>companion object</code> 是引用类型，语法与 Kotlin 一致。类和方法默认 <code>final</code>，需要 <code>open</code> 才能被继承或覆写；接口方法可以有默认实现；扩展函数为已有类型添加方法。</p>
+{{example classes}}
+<ul>
+  <li>值类型（struct / enum）也可以实现接口；转为接口或 <code>Any</code> 时自动装箱；</li>
+  <li>引用类型的 <code>===</code> 比较对象 identity；<code>==</code> 只决议静态类型上可见的 <code>operator fun equals</code>，不存在 <code>Any.equals</code> 回退；</li>
+  <li>默认可见性是 <code>internal</code>（Cone 内可见）；覆写 <code>public</code> 接口成员（如 <code>ToString.toString</code>）时需要写 <code>public override</code>；</li>
+  <li><code>sealed class</code> / <code>sealed interface</code> 限定直接子类型，配合 <code>when</code> 做穷尽检查（见<a href="#operators">运算符</a>一节的例子）。</li>
+</ul>
+
+<h2 id="generics">泛型</h2>
+<p>函数、class、struct、enum 和 interface 都可以有类型参数。泛型采用<strong>单态化</strong>：每组具体类型实参生成一份专门代码，没有类型擦除，也不需要 <code>reified</code>。类型参数用上界约束能力，例如 <code>T : Compare&lt;T&gt;</code> 允许使用比较运算符。</p>
+{{example generics}}
+<ul>
+  <li>所有类型参数都是<strong>不变</strong>的：没有 <code>in</code>/<code>out</code> 型变和 <code>*</code> 投影，<code>Box&lt;String&gt;</code> 不是 <code>Box&lt;Any&gt;</code> 的子类型；</li>
+  <li>调用处可以显式写类型实参，也可以用 <code>_</code> 只写一部分：<code>convert&lt;Int, _&gt;(value)</code>；</li>
+  <li><code>where</code> 子句、条件接口实现与负向约束等高级特性见语言规范 3.2、9.1.8 节。</li>
+</ul>
+
+<h2 id="functions">函数值与集合</h2>
+<p>lambda 写作 <code>{ x -&gt; body }</code>，单参数可以用 <code>it</code>；最后一个函数参数可以写成尾随 lambda。<code>scoop.collections</code> 提供 <code>List</code>、<code>HashMap</code>、<code>LinkedHashMap</code>、<code>TreeMap</code> 等集合以及 <code>filter</code>/<code>map</code>/<code>sorted</code> 等常用操作。</p>
+{{example lambdas}}
+<div class="callout warn">
+  <strong>闭包不能捕获 var</strong>
+  <p>Scoop 的闭包在创建时<strong>按值</strong>捕获环境，只允许捕获 <code>val</code>、参数和 <code>this</code>，读写外层 <code>var</code> 都是编译错误。需要在多个闭包之间共享可变状态时，显式捕获一个引用对象（如上例的 <code>Cell</code>）。</p>
+</div>
+<p>还可以使用 <code>fun(x: Int): Int { … }</code> 匿名函数、<code>::name</code> 函数引用、默认参数、命名参数和 <code>vararg</code>。</p>
+
+<h2 id="operators">运算符与 sealed 层级</h2>
+<p>用 <code>operator fun</code> 重载运算符（<code>plus</code>、<code>times</code>、<code>get</code>、<code>invoke</code>、<code>compareTo</code> 等），<code>infix fun</code> 支持中缀调用。下面的例子同时展示了 struct 实现 sealed interface，并通过 <code>is</code> 分支做穷尽匹配和 smart cast：</p>
+{{example ops}}
+
+<h2 id="exceptions">异常</h2>
+<p><code>try</code>/<code>catch</code>/<code>finally</code> 与 <code>throw</code> 和 Kotlin 一致，<code>try</code> 也是表达式。异常类继承自 <code>Exception</code>，消息是 <code>String?</code>。</p>
+{{example errors}}
+<p>标准库的命名约定：可能失败的解析/查找提供抛异常版本与返回 <code>Option</code> 的 <code>…OrNone</code> 版本，例如 <code>toInt()</code> / <code>toIntOrNone()</code>。</p>
+
+<h2 id="coroutines">协程与异步 I/O</h2>
+<p>Scoop 支持 <code>suspend</code> 函数与挂起 lambda <code>suspend { … }</code>。核心库提供协程原语和结构化并发（<code>Job</code>、<code>Deferred</code>、作用域取消）；<code>scoop.asyncio</code> 的 <code>PlatformEventLoop</code> 提供定时器、TCP/UDP 与文件 I/O，macOS 后端使用 libdispatch，Linux 后端使用 io_uring：</p>
+{{example coroutines}}
+<ul>
+  <li><code>scope.async</code> 启动返回值的任务，<code>scope.launch</code> 启动不返回值的任务，<code>await()</code> / <code>join()</code> 等待完成；</li>
+  <li>任务树是结构化的：父作用域结束前等待所有子任务。取消是协作式的，由任务检查或支持取消的挂起操作观察，异常退出时 <code>finally</code> 照常执行；不会抢占正在执行的普通代码；</li>
+  <li><code>PlatformEventLoop</code> 只运行一次，不能嵌套启动或在结束后复用。Linux 后端要求内核 6.1 及所需 io_uring 能力；详见<a href="stdlib.html#platform">平台与异步 I/O</a>；</li>
+  <li>Scoop 支持多线程，但不在类型系统中保证无数据竞争；跨线程共享数据需要使用原子类型（<code>Atomic*</code>，带显式内存序）或同步原语。</li>
+</ul>
+
+<h2 id="resources">确定性资源管理</h2>
+<p>托管对象由 GC 回收，但文件、套接字、正则引擎等原生资源需要确定性释放。同步 I/O 和具有关闭语义的对象实现 <code>Closeable.close()</code>，用 <code>use</code> 在正文正常或异常退出时关闭；需要挂起关闭的对象实现 <code>AsyncCloseable</code>，使用 <code>useAsync</code>：</p>
+{{example regex}}
+<p><code>Closeable</code> 继承 <code>Disposable</code>，默认 <code>dispose()</code> 转调 <code>close()</code>，因此复用同一套 <code>use</code>。取消登记、锁、线程等一般资源仍使用 <code>Disposable.dispose()</code>。如果正文和清理都失败，<code>use</code>/<code>useAsync</code> 用 <code>ResourceUseException</code> 保留两个错误。</p>
+<p>直接持有原生资源的 <code>final class</code> 还可以声明 <code>release { … }</code>，在对象被 GC 回收时尽力清理。它不保证执行时间或程序退出时执行；只能使用满足 release-safe 规则的 GC-free 操作和 helper，不能分配托管对象、挂起或通过原生调用回调 Scoop。确定性释放依靠显式 <code>close</code>、<code>use</code> 或 <code>useAsync</code>，不能用 <code>@NoGC</code> 或 <code>release</code> 替代：</p>
+{{example release}}
+
+<h2 id="ffi">C FFI</h2>
+<p><code>@Extern</code> 把没有函数体的顶层函数绑定到原生符号。C ABI 的 extern 是 unsafe 函数，只能在 <code>@Unsafe</code> 上下文中调用；签名上只能出现 C 兼容（GC-free）的类型。</p>
+{{example ffi}}
+<ul>
+  <li><code>Ptr&lt;T&gt;</code> 是原生指针，<code>FunPtr&lt;F&gt;</code> 是 C 函数指针，<code>sizeOf&lt;T&gt;()</code> / <code>alignOf&lt;T&gt;()</code> 查询布局；</li>
+  <li><code>@CLayout</code> struct 按 C 规则布局，可以按值传给 C 函数；</li>
+  <li><code>@Extern(lib = "…")</code> 指定逻辑库名，<code>captureErrno = true</code> 让调用同时返回 <code>errno</code>；</li>
+  <li><code>@NoGC</code> 标注保证函数不分配托管对象、不进入 GC；<code>@Global</code> / <code>@ThreadLocal</code> 声明原生全局存储；</li>
+  <li>Cone 可以携带 C/C++ 源码，与 Scoop 代码一起编译链接。</li>
+</ul>
+
+<h2 id="codec">编码、解码与类型描述</h2>
+<p>在 companion 上声明 <code>ValueEncoder&lt;T&gt;</code> / <code>ValueDecoder&lt;T&gt;</code>，编译器就会为 struct 合成编解码实现，供 JSON、命令行参数、HTTP 查询参数等不同格式复用：</p>
+{{example cli}}
+<pre><code class="language-sh">$ scoop run --release cli.scoop Ada --count 2 --excited</code></pre>
+<p><code>typeInfo&lt;T&gt;()</code> 返回编译器生成的静态类型描述（字段、注解、构造关系），用于上面的命令行 schema 这类场景；Scoop 不提供运行期反射。</p>
+
+<h2 id="packages">package 与 import</h2>
+<p>Cone 中的每个文件以 <code>package</code> 声明开头，再用 <code>import</code> 引入其他包的名称：</p>
+<pre><code class="language-scoop">package dev.example.app
+
+import scoop.collections.*          // 整个包
+import scoop.time.Duration          // 单个名称
+import scoop.io.encoding.Base64</code></pre>
+<p>核心库的 prelude（<code>println</code>、<code>Option</code> 及其变体 <code>Some</code>/<code>None</code>、<code>ArrayList</code>、<code>StringBuilder</code> 等）默认可见。可见性修饰符有 <code>public</code>、<code>internal</code>（默认，Cone 内可见）、<code>protected</code> 和 <code>private</code>。</p>
+
+<h2 id="testing">测试</h2>
+<p>测试放在 Cone 的 <code>tests/</code> 目录中，依赖 <code>scoop.test</code>（在 <code>[test-dependencies]</code> 中声明）。用 <code>@Test</code> 标注测试类与测试方法，方法名可以用反引号写成一句话：</p>
+<pre><code class="language-scoop">package examples.testing
+
+import scoop.test.*
+
+@Test
+private class CalculatorTests {
+    @Test
+    fun `division returns a value`() {
+        assertEquals(6, divide(42, 7))
+        assertTrue(divide(42, 7) &gt; 0)
+    }
+
+    @Test
+    fun `zero count reports the reason`() {
+        val error = assertFailsWith&lt;IllegalArgumentException&gt; { divide(42, 0) }
+        assertEquals(Some("count must not be zero"), error.message)
+    }
+}</code></pre>
+<p><code>scoop test</code> 运行选中的用例并逐项报告结果；断言库还提供前后置钩子、忽略标记等功能，见 <code>scoop.test</code> 的 <a href="../api/index.html">API 文档</a>。</p>
+
+<h2 id="more">继续深入</h2>
+<p>这份导览只覆盖了常用部分。属性委托、接口委托、<code>inner class</code>、匿名 object、task-local 上下文参数 <code>context(name: T)</code>、文档注释、原子类型与内存序、<code>MaybeUninit&lt;T&gt;</code> 等特性，请阅读完整的<a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-SPEC.md">Scoop 语言规范</a>。</p>

@@ -1,0 +1,6 @@
+checked 8080
+port 8080
+checked http
+error: not a number: http
+checked 70000
+error: out of range: 70000

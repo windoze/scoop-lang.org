@@ -1,0 +1,16 @@
+//! dep: scoop:scoop.math:0.1.0
+
+import scoop.math.*
+
+fun factorial(n: Long): BigInteger {
+    var result = BigInteger(1L)
+    for (i in 2L..n) result = result * BigInteger(i)
+    return result
+}
+
+fun main() {
+    println(f"30! = ${factorial(30L)}")
+    val price = "19.95".toBigDecimal() * BigDecimal(3L)
+    println(f"total = ${price}")
+    println(f"1/3 = ${BigDecimal.ONE.div(BigDecimal(3L), MathContext(10L))}")
+}

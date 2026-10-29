@@ -1,0 +1,24 @@
+struct User(val name: String, val email: String?)
+
+fun find(users: Array<User>, name: String): User? {
+    for (u in users) {
+        if (u.name == name) return Some(u)
+    }
+    return None
+}
+
+fun main() {
+    val users = [User("ada", Some("ada@example.com")), User("lin", None)]
+    // `?.` does not flatten: the result is Option<Option<String>>
+    val email: String?? = find(users, "ada")?.email
+    println(email == Some(Some("ada@example.com")))
+    val domain: String = when (val e = find(users, "lin")) {
+        case Some(User { email: Some(addr), .. }) -> addr
+        case Some(_) -> "no email"
+        case None -> "no user"
+    }
+    println(domain)
+    println(find(users, "bob")?.name ?: "anonymous")
+    val nested: Int?? = Some(None)
+    println(nested == None)
+}

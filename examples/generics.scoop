@@ -1,0 +1,30 @@
+struct Box<T>(val value: T) {
+    fun <R> map(transform: (T) -> R): Box<R> = Box(transform(value))
+}
+
+fun <T : Compare<T>> maxOf(items: Array<T>): T {
+    var best = items[0L]
+    for (item in items) {
+        if (item > best) best = item
+    }
+    return best
+}
+
+fun <T : ToString> joinAll(items: Array<T>, sep: String): String {
+    val sb = StringBuilder()
+    var first = true
+    for (item in items) {
+        if (!first) sb.append(sep)
+        sb.append(item)
+        first = false
+    }
+    return sb.toString()
+}
+
+fun main() {
+    val b = Box(21).map { it * 2 }
+    println(b.value)
+    println(maxOf([3, 9, 4]))
+    println(maxOf(["pear", "apple", "zoo"]))
+    println(joinAll([1, 2, 3], " + "))
+}

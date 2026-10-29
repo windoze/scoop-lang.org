@@ -1,0 +1,7 @@
+dist/
+.bundle/
+.jekyll-cache/
+.jekyll-metadata
+vendor/
+__pycache__/
+.ruff_cache/

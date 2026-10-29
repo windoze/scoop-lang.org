@@ -1,0 +1,50 @@
+import scoop.text.*
+
+interface Animal {
+    val name: String
+    fun sound(): String
+    fun greet(): String = f"${name} says ${sound()}"
+}
+
+open class Pet(override val name: String) : Animal {
+    override fun sound(): String = "..."
+}
+
+class Dog(name: String) : Pet(name) {
+    override fun sound(): String = "woof"
+}
+
+class Counter {
+    var value: Int = 0
+
+    fun increment() {
+        value += 1
+    }
+
+    companion object {
+        fun startingAt(n: Int): Counter {
+            val c = Counter()
+            for (i in 0 until n) c.increment()
+            return c
+        }
+    }
+}
+
+object Registry {
+    val names = ArrayList<String>()
+}
+
+fun String.shout(): String = this.uppercaseAscii() + "!"
+
+fun main() {
+    val animals: Array<Animal> = [Dog("Rex") as Animal, Pet("Tom") as Animal]
+    for (a in animals) println(a.greet())
+
+    val c = Counter.startingAt(2)
+    c.increment()
+    println(c.value)
+
+    Registry.names.add("scoop")
+    println(Registry.names.size)
+    println("hello".shout())
+}

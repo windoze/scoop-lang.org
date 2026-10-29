@@ -1,0 +1,24 @@
+struct Point(val x: Int, val y: Int) : ToString {
+    fun dist2(): Int = x * x + y * y
+    public override fun toString(): String = f"(${x}, ${y})"
+}
+
+struct Config(val host: String, val port: Int = 8080, val debug: Boolean = false)
+
+fun main() {
+    val p = Point(3, 4)
+    val q = p.{ y: 10 }
+    println(f"p=${p} q=${q} |p|^2=${p.dist2()}")
+    println(p == Point(3, 4))
+
+    val (x, y) = p
+    println(x + y)
+
+    val config = Config("localhost", debug = true)
+    val Config { host, port, .. } = config
+    println(f"${host}:${port}")
+
+    val pair = (1, "one")
+    val (num, word) = pair
+    println(f"${num} -> ${word}, ${pair._2}")
+}

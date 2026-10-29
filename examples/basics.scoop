@@ -1,0 +1,25 @@
+fun fib(n: Int): Long {
+    var a = 0L
+    var b = 1L
+    for (i in 0 until n) {
+        val next = a + b
+        a = b
+        b = next
+    }
+    return a
+}
+
+fun classify(n: Int): String = if (n % 2 == 0) "even" else "odd"
+
+fun main() {
+    val name = "Scoop"
+    var count = 3
+    count += 1
+    println(f"Hello, ${name}! count=${count}")
+    println(f"fib(50) = ${fib(50)}")
+    for (n in 1..3) {
+        println(f"${n} is ${classify(n)}")
+    }
+    val text = """raw string: $name is literal"""
+    println(text)
+}

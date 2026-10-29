@@ -1,0 +1,21 @@
+struct Vec2(val x: Double, val y: Double) : ToString {
+    operator fun plus(other: Vec2): Vec2 = Vec2(x + other.x, y + other.y)
+    operator fun times(k: Double): Vec2 = Vec2(x * k, y * k)
+    public override fun toString(): String = f"Vec2(${x}, ${y})"
+}
+
+sealed interface Expr {}
+struct Num(val value: Int) : Expr
+struct Add(val left: Expr, val right: Expr) : Expr
+struct Mul(val left: Expr, val right: Expr) : Expr
+
+fun eval(e: Expr): Int = when (e) {
+    is Num -> e.value
+    is Add -> eval(e.left) + eval(e.right)
+    is Mul -> eval(e.left) * eval(e.right)
+}
+
+fun main() {
+    println((Vec2(1.0, 2.0) + Vec2(0.5, 0.5)) * 2.0)
+    println(eval(Add(Num(2), Mul(Num(3), Num(4)))))
+}

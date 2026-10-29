@@ -1,0 +1,105 @@
+<!-- title: 对比 Kotlin; nav: kotlin; layout: docs; description: 面向 Kotlin 开发者的 Scoop 差异速查：值类型、Option、f-string、闭包捕获、泛型不变性、可见性与数值类型。 -->
+<h1>对比 Kotlin</h1>
+<p class="intro">Scoop 尽量兼容 Kotlin 的核心语法：类、接口、object、扩展函数、lambda、默认/命名参数、运算符重载、<code>when</code>、异常与 <code>suspend</code> 都按你熟悉的方式工作。本页列出 Kotlin 开发者最需要注意的差异。</p>
+
+<h2 id="overview">一览表</h2>
+<div class="table-wrap"><table>
+  <tr><th>主题</th><th>Kotlin</th><th>Scoop</th></tr>
+  <tr><td>空值</td><td><code>null</code>，<code>T?</code> 是可空引用</td><td>没有 <code>null</code>；<code>T?</code> 是 <code>Option&lt;T&gt;</code>，值为 <code>Some(x)</code> / <code>None</code></td></tr>
+  <tr><td>嵌套可空</td><td><code>T??</code> ≡ <code>T?</code></td><td><code>T??</code> 是 <code>Option&lt;Option&lt;T&gt;&gt;</code>；<code>?.</code> 不展平结果</td></tr>
+  <tr><td>数据类</td><td><code>data class</code></td><td><code>struct</code>：不可变值类型，副本更新 <code>s.{ f: v }</code></td></tr>
+  <tr><td>枚举</td><td><code>enum class</code> + <code>sealed class</code></td><td>带载荷的 <code>enum</code>（代数数据类型），整型枚举 <code>enum E: Int</code></td></tr>
+  <tr><td>值类</td><td><code>value class</code>（JVM）</td><td>原生值类型 struct / enum / tuple</td></tr>
+  <tr><td>元组</td><td><code>Pair</code> / <code>Triple</code></td><td>内建 tuple <code>(a, b, c)</code>，<code>._1</code> 访问；<code>()</code> 即 <code>Unit</code></td></tr>
+  <tr><td>字符串模板</td><td><code>"$name ${expr}"</code></td><td>只有 f-string 插值：<code>f"${name}"</code>，必须带花括号</td></tr>
+  <tr><td>模式匹配</td><td><code>when</code> 只做值/类型判断</td><td><code>case</code> 分支支持嵌套解构、guard 与穷尽性检查</td></tr>
+  <tr><td>闭包捕获</td><td>可以捕获并修改 <code>var</code></td><td>按值捕获，<strong>不能捕获 <code>var</code></strong></td></tr>
+  <tr><td>泛型实现</td><td>类型擦除，<code>reified</code> 需 inline</td><td>单态化，没有擦除，无需 <code>reified</code></td></tr>
+  <tr><td>型变</td><td><code>in</code> / <code>out</code> / <code>*</code></td><td>全部不变，没有声明点/使用点型变</td></tr>
+  <tr><td>默认可见性</td><td><code>public</code></td><td><code>internal</code>（当前 Cone 可见）</td></tr>
+  <tr><td>根类型</td><td><code>Any</code> 有 <code>equals</code>/<code>hashCode</code>/<code>toString</code></td><td><code>Any</code> 没有成员；<code>Equals</code>、<code>Hash</code>、<code>ToString</code> 需显式实现</td></tr>
+  <tr><td><code>Int</code> 宽度</td><td>32 位</td><td>32 位；集合长度/下标是 <code>Long</code></td></tr>
+  <tr><td>数值提升</td><td>部分字面量隐式转换</td><td>不同整数类型间不隐式提升，需显式 <code>toLong()</code> 等</td></tr>
+  <tr><td>反射</td><td><code>KClass</code>、<code>kotlin.reflect</code></td><td>无运行期反射；编译期生成的 <code>typeInfo&lt;T&gt;()</code></td></tr>
+  <tr><td>FFI</td><td><code>external</code> / JNI</td><td><code>@Extern</code> 直接绑定 C 符号</td></tr>
+  <tr><td>构建</td><td>Gradle / Maven</td><td><code>Cone.toml</code> 声明依赖来源与版本要求，<code>scoop pm</code> 解析，<code>Cone.lock</code> 固定精确选择</td></tr>
+</table></div>
+
+<h2 id="option">Option 而非 null</h2>
+<p><code>?.</code>、<code>?:</code>、<code>!!</code>、<code>as?</code> 都保留，但底层是普通 enum。构造可空值时需要写 <code>Some(x)</code> 或 <code>None</code>：</p>
+<pre><code class="language-scoop">val nickname: String? = Some("Ada")   // 不能直接写 "Ada"
+val absent: String? = None             // 没有 null 字面量
+println(nickname ?: "guest")</code></pre>
+<p>对 <code>Option</code> 判空之后<strong>不会</strong> smart cast 成 <code>T</code>，请用 <code>when</code> 解构、<code>?:</code> 或 <code>!!</code> 取值。因为可空不会合并，若 <code>f()</code> 返回 <code>R?</code>，则 <code>a?.f()</code> 的类型是 <code>R??</code>。</p>
+
+<h2 id="values">值类型</h2>
+<p><code>struct</code>、<code>enum</code> 和 tuple 没有 identity：对它们使用 <code>===</code> 是编译错误，<code>==</code> 是自动派生的逐字段比较。struct 字段只能是 <code>val</code>，没有 <code>init</code> 块；修改通过副本更新得到新值：</p>
+<pre><code class="language-scoop">struct Config(val host: String, val port: Int = 8080)
+
+val base = Config("localhost")
+val prod = base.{ host: "example.com", port: 443 }</code></pre>
+<p>struct 的副本更新与位置解构是内建语法，不通过 Kotlin 的 <code>copy()</code> 或 <code>componentN()</code> 方法实现；也没有 <code>Config { … }</code> 形式的结构体字面量。值类型转为接口或 <code>Any</code> 时自动装箱，但数组字面量这类批量位置不会自动装箱，需要显式 <code>as</code>。</p>
+
+<h2 id="when">when 与 case</h2>
+<p>普通分支保持 Kotlin 语义；只有以 <code>case</code> 开头的分支才是模式。每个 <code>case</code> 只有一个模式，不支持用逗号并列多个模式：</p>
+<pre><code class="language-scoop">fun label(value: (Int, String?)): String = when (value) {
+    case (0, _) -&gt; "zero"
+    case (n, Some(name)) if n &gt; 0 -&gt; f"${name} #${n}"
+    case (_, Some(_)) -&gt; "negative"
+    case (_, None) -&gt; "anonymous"
+}</code></pre>
+<p>模式中的裸标识符总是新的绑定（除非它是 subject 所属 enum 的变体名）；要和已有常量比较，请使用 guard。</p>
+
+<h2 id="closures">闭包与 lambda</h2>
+<ul>
+  <li>闭包只能捕获 <code>val</code>、参数和 <code>this</code>，<strong>读写</strong>外层局部 <code>var</code> 都会报错；需要共享可变状态时显式捕获一个引用对象并修改它的属性；</li>
+  <li>捕获在创建时按值发生：值类型被完整复制进闭包环境；</li>
+  <li>lambda 中不能写裸 <code>return</code> 跳出外层函数；</li>
+  <li><code>inline</code>、<code>noinline</code>、<code>crossinline</code>、<code>reified</code>、<code>tailrec</code> 为了兼容而被接受，但解析后<strong>完全忽略</strong>，不改变任何语义。</li>
+</ul>
+
+<h2 id="generics">泛型</h2>
+<ul>
+  <li>所有类型参数都是不变的，<code>List&lt;String&gt;</code> 不是 <code>List&lt;Any&gt;</code>；需要转换时显式 <code>map</code> 或重新构造；</li>
+  <li>类型位置必须写全类型实参，没有裸泛型类型和 star projection；</li>
+  <li>调用处可以用 <code>_</code> 部分推断：<code>Pair&lt;_, String&gt;(first, second)</code>；</li>
+  <li>没有隐式的 <code>Self</code> 类型，接口契约用显式类型参数表达，例如 <code>Equals&lt;T&gt;</code>、<code>Compare&lt;T&gt;</code>；</li>
+  <li>接口方法和可覆写的虚方法不能声明自己的类型参数。</li>
+</ul>
+
+<h2 id="equality">相等、字符串化与哈希</h2>
+<p><code>Any</code> 没有任何成员。<code>==</code> 只决议左侧静态类型上的 <code>operator fun equals</code>，<code>Any == Any</code> 是编译错误。<code>println</code> 的签名是 <code>fun &lt;T : ToString&gt; println(v: T)</code>，因此打印自定义类型需要显式实现 <code>ToString</code>：</p>
+<pre><code class="language-scoop">struct Point(val x: Int, val y: Int) : ToString, Hash {
+    public override fun toString(): String = f"(${x}, ${y})"
+    public override fun hash(): Long = x.hash() * 31L + y.hash()
+}</code></pre>
+<p>注意覆写 <code>public</code> 接口成员时要写 <code>public override</code>，因为 Scoop 的默认可见性是 <code>internal</code>。</p>
+
+<h2 id="numbers">数值</h2>
+<ul>
+  <li><code>Int</code>/<code>UInt</code> 固定 32 位，<code>Long</code>/<code>ULong</code> 固定 64 位，另有 8/16 位整数；</li>
+  <li>二元运算要求两侧类型相同，字面量会按期望类型适配；不同类型需显式转换；</li>
+  <li>溢出回绕，<code>compareTo</code> 返回 <code>Long</code>；</li>
+  <li>数组、字符串和集合的长度、下标使用 <code>Long</code>：<code>array[0L]</code>、<code>text.charLength</code>。</li>
+</ul>
+
+<h2 id="removed">不包含的 Kotlin 特性</h2>
+<ul>
+  <li>多平台：<code>expect</code> / <code>actual</code>；</li>
+  <li>JVM 互操作：<code>@JvmStatic</code>、<code>@Throws</code> 等注解，SAM 转换、平台类型 <code>T!</code>；</li>
+  <li><code>external</code> 声明（改用 <code>@Extern</code>）；</li>
+  <li>运行期反射与 <code>::class</code> 反射 API；</li>
+  <li><code>data class</code>、<code>enum class</code>、<code>inline</code>/<code>value class</code>；</li>
+  <li><code>null</code> 字面量及普通字符串的 <code>$</code> 插值。</li>
+</ul>
+
+<h2 id="additions">Scoop 新增的能力</h2>
+<ul>
+  <li>值类型、副本更新、嵌套解构与穷尽的模式匹配；</li>
+  <li>单态化泛型，以及条件接口实现、负向约束等泛型约束；</li>
+  <li>编译期合成的编解码（<code>ValueEncoder</code> / <code>ValueDecoder</code>）与静态类型描述；</li>
+  <li>直接的 C FFI：<code>@Extern</code>、<code>@CLayout</code>、<code>Ptr</code>、<code>FunPtr</code>、<code>@Unsafe</code>、<code>@NoGC</code>；</li>
+  <li>确定性资源释放：同步关闭用 <code>Closeable</code> + <code>use</code>，异步关闭用 <code>AsyncCloseable</code> + <code>useAsync</code>；一般资源保留 <code>Disposable.dispose()</code>。GC-free 的 <code>release</code> 块只提供尽力而为的回收清理；</li>
+  <li>task-local 的上下文参数 <code>context(name: T)</code>，在协程与任务之间按规则传播；</li>
+  <li>编译到原生可执行文件，无需虚拟机。</li>
+</ul>

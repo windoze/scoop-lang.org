@@ -1,0 +1,32 @@
+enum Shape {
+    Circle(Double),
+    Rect { width: Double, height: Double },
+    Empty
+}
+
+fun area(shape: Shape): Double = when (shape) {
+    case Circle(r) -> 3.14159 * r * r
+    case Rect { width, height } -> width * height
+    case Empty -> 0.0
+}
+
+fun describe(value: (Int, Shape)): String = when (value) {
+    case (0, _) -> "zero-th"
+    case (n, Circle(r)) if r > 10.0 -> f"#${n}: big circle"
+    case (n, Circle(_)) -> f"#${n}: circle"
+    case (n, _) -> f"#${n}: other"
+}
+
+enum Status: Int {
+    Ok = 200,
+    NotFound = 404
+}
+
+fun main() {
+    val shapes = [Shape.Circle(1.0), Shape.Rect(width = 2.0, height = 3.0), Shape.Empty]
+    for (s in shapes) println(area(s))
+    println(describe((1, Shape.Circle(20.0))))
+    println(describe((2, Shape.Empty)))
+    val code: Int = Status.NotFound
+    println(code)
+}

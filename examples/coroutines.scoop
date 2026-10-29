@@ -1,0 +1,20 @@
+//! dep: scoop:scoop.asyncio:0.1.0
+
+import scoop.asyncio.*
+import scoop.time.Duration
+
+suspend fun fetch(loop: EventLoop, id: Int, delayMs: Long): String {
+    loop.sleep(Duration.milliseconds(delayMs))
+    return f"result #${id}"
+}
+
+fun main() {
+    val loop: EventLoop = PlatformEventLoop()
+    loop.run suspend {
+        scope ->
+        val a = scope.async<String> suspend { fetch(loop, 1, 30L) }
+        val b = scope.async<String> suspend { fetch(loop, 2, 10L) }
+        println(a.await())
+        println(b.await())
+    }
+}

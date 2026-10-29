@@ -1,0 +1,19 @@
+struct Point(val x: Int, val y: Int)
+
+enum Shape {
+    Circle(Point, Int),
+    Line(Point, Point)
+}
+
+fun describe(shape: Shape): String = when (shape) {
+    case Circle(Point(0, 0), r) -> f"circle at origin, r=${r}"
+    case Circle(center, _) -> f"circle at ${center.x},${center.y}"
+    case Line(from, to) -> f"line of dx=${to.x - from.x}"
+}
+
+fun main() {
+    val origin = Point(0, 0)
+    val moved = origin.{ x: 5 }
+    println(describe(Shape.Circle(origin, 3)))
+    println(describe(Shape.Line(origin, moved)))
+}
