@@ -1,0 +1,223 @@
+<!-- title: Cone、package 与 import; nav: reference; layout: reference; description: Scoop 的模块系统：Cone 与坐标、Cone.toml 清单与依赖、源码选择与平台条件、package 与 import、re-export、名称查找顺序、程序入口 main、单文件模式与初始化顺序。 -->
+<h1>Cone、package 与 import</h1>
+<p class="intro"><strong>Cone</strong> 是 Scoop 的模块、依赖、编译与链接单位；<strong>package</strong> 只是源码的命名空间。一个 Cone 可以包含多个 package，package 与目录结构无关。<code>internal</code> 可见性的边界就是 Cone。</p>
+
+<h2 id="cones">Cone</h2>
+<ul>
+  <li>每个 Cone 有唯一的坐标 <code>group:name:version</code>，例如 <code>dev.example:server:0.1.0</code>。<code>group</code> 与 <code>name</code> 由点分隔的小写 ASCII 段组成（每段匹配 <code>[a-z][a-z0-9-]*</code>），<code>version</code> 是精确的 SemVer。版本是身份的一部分：同一份源码的两个版本是不同的 Cone。</li>
+  <li>Cone 分为 <code>library</code> 与 <code>executable</code>。一个程序恰好有一个 executable 根，其余都是 library；executable 不能被依赖。</li>
+  <li>依赖图必须无环，同一个程序中同一 <code>group:name</code> 只能有一个版本。</li>
+  <li>每个 Cone 编译为一个 <code>.slib</code> 产物；下游 Cone 通过 <code>.slib</code> 完成类型检查、泛型实例化与链接，不需要重新读取依赖的源码。</li>
+</ul>
+
+<h2 id="manifest">Cone.toml</h2>
+<p>多文件项目是一个包含 <code>Cone.toml</code> 的目录，用 <code>scoop new --group dev.example app</code> 创建：</p>
+<pre><code class="language-toml">schema = 1
+
+[cone]
+group = "dev.example"
+name = "server"
+version = "0.1.0"
+kind = "executable"          # 或 "library"
+
+[dependencies]
+"scoop:scoop.std" = "0.1.0"                                         # 随工具链发布的系统库
+"scoop:scoop.json" = "0.1.0"
+"dev.example:model" = { path = "../model" }                         # 本地源码
+"org.example:http" = { github = "example/http", tag = "v1.2.0" }    # Git / GitHub
+"org.example:log" = { version = "1.4.0", registry = "https://packages.example.org/" }
+"org.vendor:codec" = { version = "=2.0.1", artifact = "../artifacts/codec.slib" }
+
+[test-dependencies]
+"scoop:scoop.test" = "0.1.0"</code></pre>
+<ul>
+  <li><code>schema</code> 与 <code>[cone]</code> 的四个字段必需；可选的 <code>license</code>、<code>repository</code>、<code>description</code>、<code>readme</code> 只用于发布和文档。未知字段是错误。</li>
+  <li>除 core 外，<strong>没有隐式依赖</strong>：manifest Cone 只自动依赖核心库 <code>scoop.core</code>，使用 <code>scoop.std</code> 及其他库都需要显式声明。依赖本身不导入任何名称，仍需 <code>import</code>。</li>
+  <li><code>group = "scoop"</code> 且没有指定来源的依赖从工具链的 sysroot 中查找；其他没有指定来源的依赖使用配置的默认 registry。</li>
+  <li><code>scoop pm</code> 解析整个依赖闭包并写入 <code>Cone.lock</code>，构建只消费其中的精确选择；<code>scoop build</code>/<code>run</code> 在需要时自动准备。常用命令有 <code>scoop pm add/remove</code>、<code>resolve</code>、<code>fetch</code>、<code>update</code> 与 <code>deps --why</code>。</li>
+</ul>
+<h3 id="versions">版本要求</h3>
+<div class="table-wrap"><table>
+  <tr><th>声明</th><th>允许的版本</th></tr>
+  <tr><td><code>"1.4.0"</code> 或 <code>"^1.4.0"</code></td><td><code>&gt;=1.4.0, &lt;2.0.0</code></td></tr>
+  <tr><td><code>"0.3.2"</code></td><td><code>&gt;=0.3.2, &lt;0.4.0</code></td></tr>
+  <tr><td><code>"~1.4.2"</code></td><td><code>&gt;=1.4.2, &lt;1.5.0</code></td></tr>
+  <tr><td><code>"=1.4.2"</code></td><td>只有该版本</td></tr>
+  <tr><td><code>"&gt;=1.4.0, &lt;1.8.0"</code></td><td>各比较项的交集</td></tr>
+</table></div>
+<p>版本号必须写全 <code>major.minor.patch</code>；没有 <code>latest</code>、通配符或“或”表达式。<code>artifact</code> 来源要求精确版本。来源与求解细节、workspace 与 registry 见<a href="../guides/registry.html">registry 指南</a>与<a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-PACKAGE-SPEC.md">包管理规范</a>。</p>
+
+<h3 id="workspaces">workspace</h3>
+<p>多个 Cone 可以组成 workspace：根清单的 <code>[workspace]</code> 列出 <code>members</code> 与可选的 <code>default-members</code>，成员可以用 <code>{ workspace = true }</code> 继承 <code>group</code>、<code>version</code> 等字段以及 <code>[workspace.dependencies]</code> 中的依赖声明。命令行用 <code>--workspace</code> 或 <code>-p group:name</code> 选择成员。workspace 中的每个程序独立求解依赖，可以使用不同的版本。</p>
+
+<h3 id="source-selection">源码选择与平台条件</h3>
+<p>默认情况下，Cone 的源码是 <code>src/</code> 下所有 <code>.scoop</code> 文件。出现 <code>[[sources]]</code> 时，它就是完整的源码清单，可以用 <code>when</code> 按构建目标选择：</p>
+<pre><code class="language-toml">[[sources]]
+path = "src/common"
+
+[[sources]]
+path = "src/os/linux"
+when = { os = "linux" }
+
+[[sources]]
+path = "src/os/darwin"
+when = { os = "darwin" }</code></pre>
+<ul>
+  <li><code>when</code> 支持 <code>os</code>（<code>darwin</code>、<code>linux</code>、<code>windows</code>）、<code>arch</code>（<code>aarch64</code>、<code>x86_64</code>）与 <code>env</code>（<code>none</code>、<code>gnu</code>、<code>musl</code>、<code>msvc-ucrt</code>、<code>llvm-mingw-ucrt</code>、<code>llvm-mingw-msvcrt</code>）；多个键取“与”，同一键的数组取“或”。条件按构建目标而不是宿主求值。各目标对应的取值见<a href="#targets">构建目标</a>。</li>
+  <li>选中的路径不能重叠或重复；最终源码为空是构建错误。文件按完整相对路径排序，编译结果不依赖文件枚举顺序。</li>
+  <li>Scoop 没有文件内的条件编译或 <code>expect</code>/<code>actual</code>：平台差异通过按目标选择源码目录来表达。</li>
+  <li>C/C++ 源码与系统库在 <code>[native]</code> 中配置，见<a href="ffi.html#native-sources">原生互操作</a>。</li>
+</ul>
+
+<h3 id="windows-config">Windows 可执行程序</h3>
+<p>executable Cone 可以用 <code>[windows]</code> 节配置 Windows 程序的 PE 子系统与资源：</p>
+<pre><code class="language-toml">[windows]
+subsystem = "gui"            # "console"（默认）或 "gui"
+rc = "resources/app.rc"      # 可选：相对 Cone 根的资源脚本（图标、版本信息等）</code></pre>
+<ul>
+  <li>只作用于 Windows 目标，其他目标不读取 RC 文件；library Cone 使用该节、未知字段或非法取值都是清单错误。</li>
+  <li><code>gui</code> 程序启动时不打开控制台窗口，运行时也不会为它自动分配控制台；两种子系统使用相同的 <code>main</code>、命令行参数与退出码规则，都不会隐式启动窗口库或消息循环。</li>
+  <li>RC 脚本按 UTF-8 读取，用所选 Windows 目标的 Clang 预处理器和头文件编译，包含路径还包括本 Cone 的 <code>native.include</code>；<code>c_flags</code> 不作用于 RC。编译结果保存在 executable 的 <code>.slib</code> 中，只链接已有产物时不需要 RC 源码。</li>
+  <li>测试程序与单文件程序总是 console 子系统，不继承生产程序的 GUI 设置或资源。</li>
+</ul>
+
+<h3 id="test-config">测试配置</h3>
+<p>测试源码默认位于 <code>tests/</code>（可用 <code>[[test.sources]]</code> 改变），测试专用依赖写在 <code>[test-dependencies]</code>。普通构建不读取、不检查测试源码与测试依赖；测试构建把生产与测试源码合并为同一个 Cone，测试代码可以访问 <code>internal</code> 声明，生产代码看不到测试声明。见<a href="testing.html">测试库</a>。</p>
+
+<h2 id="packages">package</h2>
+<p>文件开头的 <code>package</code> 声明该文件中的顶层声明所属的命名空间。文件的结构固定为：可选的 <code>package</code>、若干 <code>import</code>、声明。</p>
+<ul>
+  <li>manifest Cone 的每个源文件<strong>必须</strong>声明 package，且 package 必须等于 Cone 的 <code>group</code> 或以它为前缀：group <code>dev.example</code> 允许 <code>dev.example</code> 与 <code>dev.example.http</code>，不允许 <code>dev.examples</code> 或 <code>other</code>。group 中带连字符的段用反引号书写，例如 <code>package dev.`my-team`</code>。</li>
+  <li>文件路径不决定 package；同一 Cone 的所有文件一起编译，彼此之间没有顺序。</li>
+  <li>不同 Cone 可以向同名 package 贡献声明（split package），但这不授予额外的可见性，来自不同 Cone 的同名声明仍是不同的实体。</li>
+  <li>单文件模式不需要 package；写了 package 时编译器给出警告并忽略它。</li>
+</ul>
+
+<h2 id="imports">import</h2>
+<pre><code class="language-scoop">import scoop.collections.*                      // 导入 package 中的全部名称
+import scoop.time.Duration                      // 导入单个名称
+import scoop.collections.HashMap as Map         // 导入并改名
+import Color.*                                  // 导入 enum 的全部变体
+
+enum Color { Red, Green }
+
+fun main() {
+    val counts = Map&lt;String, Int&gt;()
+    counts["red"] = 1
+    val c: Color = Red
+    println(f"${counts.size} ${c == Color.Red}")
+}</code></pre>
+<ul>
+  <li>import 可以指向当前 Cone 中可访问的声明、直接依赖的 <code>public</code> 声明及其 re-export，以及核心库。<strong>间接依赖</strong>的 package 不能直接导入，需要在自己的清单中声明为直接依赖。</li>
+  <li>选中一个类型后可以继续导入它的嵌套声明、object 与 companion 成员，以及 enum 变体（<code>import E.*</code>）。</li>
+  <li>通配 import 不能带 <code>as</code>。同一名称经不同路径导入到同一个声明时视为同一个；来自不同 Cone 的同名不可重载声明在同一层相遇是歧义错误。</li>
+  <li>表达式中不能直接写包名：<code>scoop.compiler.env("X")</code> 不是合法的调用，应先 <code>import scoop.compiler.env</code> 再调用 <code>env("X")</code>；函数引用同样写作导入后的 <code>::env</code>。</li>
+  <li>核心库的 prelude 默认可见：<code>println</code>、<code>Option</code> 及 <code>Some</code>/<code>None</code>、<code>ArrayList</code>、<code>StringBuilder</code>、<code>Closeable</code> 等，见<a href="core.html">核心库</a>。</li>
+</ul>
+
+<h3 id="block-imports">块级 import</h3>
+<p>代码块中也可以写 <code>import</code>，作用范围从该语句之后到块结束，可以被嵌套块继承：</p>
+<pre><code class="language-scoop">fun buildTag(): String {
+    import scoop.compiler.env
+    return env("SCOOP_BUILD_TAG") ?: "dev"
+}
+
+fun main() {
+    println(buildTag())
+}</code></pre>
+<p>块级 import 只影响编译期的名称查找；内层块的 import 优先于外层块。<code>public import</code> 只能写在文件头。</p>
+
+<h3 id="reexport">re-export</h3>
+<p><code>public import</code> 除了在当前文件中导入名称，还把目标以当前文件的 package 重新导出给依赖当前 Cone 的代码：</p>
+<pre data-check="skip"><code class="language-scoop">package dev.example.api
+
+public import dev.example.model.User           // 下游可以写 import dev.example.api.User
+public import dev.example.model.Order as PurchaseOrder</code></pre>
+<ul>
+  <li>只能 re-export 依赖中的 <code>public</code> 声明，不能 re-export 当前 Cone 自己的声明。</li>
+  <li>re-export 只建立新的名称，不创建包装或副本，导入方得到的是同一个实体。re-export 可以成链。</li>
+  <li>公开 API 签名中引用的依赖类型，即使没有 re-export，下游也能正常使用；只是不能直接写出它的短名称。希望下游只依赖当前 Cone 时，请显式 re-export。</li>
+</ul>
+
+<h2 id="lookup">名称查找顺序</h2>
+<p>没有显式接收者的名称按以下顺序查找，越靠前优先级越高：</p>
+<ol>
+  <li>局部变量、参数与局部函数；</li>
+  <li>隐式 <code>this</code> 的成员；</li>
+  <li>已生效的块级 import（由内到外；同一块中具体名称先于通配）；</li>
+  <li>当前文件的具体 import（含别名与 <code>public import</code>）；</li>
+  <li>当前 package 中可访问的声明；</li>
+  <li>当前文件的通配 import；</li>
+  <li>核心库 prelude；</li>
+  <li>期望类型唯一确定的 enum 中的同名变体。</li>
+</ol>
+<p>带显式接收者的调用先查真实的成员，再按同样的作用域顺序查扩展。对函数调用，编译器只在第一个含有<strong>适用</strong>候选的层中做重载选择；高层只有同名但不适用的函数时继续查下一层。类型、object、属性等不能重载的名称在同一层出现多个来源时是歧义错误。依赖的声明顺序、re-export 链的长短都不影响结果。</p>
+
+<h2 id="entry">程序入口</h2>
+<p>executable 的根 Cone 必须恰好有一个顶层的普通 <code>main</code> 函数（非泛型、非挂起），签名为以下之一：</p>
+<div class="table-wrap"><table>
+  <tr><th>签名</th><th>正常结束时的退出码</th></tr>
+  <tr><td><code>fun main()</code></td><td>0</td></tr>
+  <tr><td><code>fun main(args: Array&lt;String&gt;)</code></td><td>0</td></tr>
+  <tr><td><code>fun main(): Int</code></td><td>返回的值</td></tr>
+  <tr><td><code>fun main(args: Array&lt;String&gt;): Int</code></td><td>返回的值</td></tr>
+</table></div>
+<ul>
+  <li><code>main</code> 不需要是 <code>public</code>；依赖中的 <code>main</code> 不参与入口选择，library 中名为 <code>main</code> 的函数只是普通函数。</li>
+  <li><code>args</code> 包含完整的原生 argv：<strong><code>args[0]</code> 是程序自身的启动路径</strong>，用户参数从 <code>args[1]</code> 开始。这与 Java/Kotlin 不同。参数保持原有顺序，空字符串也会保留。</li>
+  <li>参数按严格 UTF-8 解码；含非法 UTF-8 时程序以退出码 1 启动失败，不调用 <code>main</code>。Windows 的原生参数是 UTF-16，先无损转换为 WTF-8，因此含非配对 surrogate 的参数（包括 <code>args[0]</code>）同样导致启动失败。需要原始参数的程序使用无参数的 <code>main</code> 并通过 <code>scoop.platform</code> 读取（Windows 上得到保留全部 UTF-16 code unit 的 <code>OsString</code>）。</li>
+  <li>返回 <code>Int</code> 的 <code>main</code> 可以返回任何 <code>Int</code>；POSIX 系统上父进程通常只能看到低 8 位，Windows 保留完整的 32 位退出码。未捕获异常、启动失败与 trap 都以退出码 1 结束。</li>
+  <li><code>main</code> 返回时仍有未 join 的线程或未释放的原生回调，是关闭失败，程序以退出码 1 结束。</li>
+</ul>
+<pre><code class="language-scoop">fun main(args: Array&lt;String&gt;): Int {
+    if (args.size &lt; 2L) {
+        println("usage: greet NAME")
+        return 2
+    }
+    for (i in 1L until args.size) println(f"Hello, ${args[i]}!")
+    return 0
+}</code></pre>
+<pre><code class="language-sh">$ scoop run --release greet.scoop -- Ada Lin
+Hello, Ada!
+Hello, Lin!</code></pre>
+
+<h2 id="single-file">单文件模式</h2>
+<p><code>scoop run file.scoop</code> 与 <code>scoop build file.scoop</code> 把指定的文件当作一个只含该文件的可执行 Cone：</p>
+<ul>
+  <li>默认依赖 <code>scoop:scoop.core:0.1.0</code> 与 <code>scoop:scoop.std:0.1.0</code>；</li>
+  <li>额外依赖写在文件头部的 <code>//! dep: group:name:version</code> 行注释中（在第一个语言记号之前，可以有多行），只能使用精确坐标，从 sysroot 或显式的 artifact 路径查找；</li>
+  <li>不读取旁边的 <code>Cone.toml</code>、其他源文件或 C 源码，<code>package</code> 声明被忽略；</li>
+  <li>首行可以是 <code>#!</code> 解释器行，见<a href="lexical.html#shebang">词法结构</a>。</li>
+</ul>
+<pre><code class="language-scoop">//! dep: scoop:scoop.json:0.1.0
+
+import scoop.json.*
+
+fun main() {
+    println(Json.stringify(Json.parse("[1, 2, 3]")))
+}</code></pre>
+
+<h2 id="targets">构建目标</h2>
+<p>Scoop 的目标名同时确定架构、操作系统、原生工具链环境与 C 运行时。不同目标的 <code>.slib</code>、运行时和缓存互不相容；用 <code>--target</code> 选择目标，省略时使用宿主的默认目标。</p>
+<div class="table-wrap"><table>
+  <tr><th>目标</th><th><code>os</code> / <code>arch</code> / <code>env</code></th><th>说明</th></tr>
+  <tr><td><code>aarch64-apple-darwin</code></td><td><code>darwin</code> / <code>aarch64</code> / <code>none</code></td><td>macOS，Apple Clang 与系统 SDK</td></tr>
+  <tr><td><code>x86_64-unknown-linux-gnu</code></td><td><code>linux</code> / <code>x86_64</code> / <code>gnu</code></td><td>Linux glibc，默认动态链接</td></tr>
+  <tr><td><code>x86_64-unknown-linux-musl</code></td><td><code>linux</code> / <code>x86_64</code> / <code>musl</code></td><td>Linux musl，默认静态链接</td></tr>
+  <tr><td><code>x86_64-pc-windows-msvc-ucrt</code></td><td><code>windows</code> / <code>x86_64</code> / <code>msvc-ucrt</code></td><td>Windows 默认目标：Microsoft SDK/MSVC 工具集（cl 或 clang-cl）、UCRT、MSVC STL</td></tr>
+  <tr><td><code>x86_64-w64-windows-llvm-mingw-ucrt</code></td><td><code>windows</code> / <code>x86_64</code> / <code>llvm-mingw-ucrt</code></td><td>LLVM-MinGW、UCRT、libc++</td></tr>
+  <tr><td><code>x86_64-w64-windows-llvm-mingw-msvcrt</code></td><td><code>windows</code> / <code>x86_64</code> / <code>llvm-mingw-msvcrt</code></td><td>LLVM-MinGW、旧版 <code>msvcrt.dll</code>、libc++</td></tr>
+</table></div>
+<ul>
+  <li>Windows 目标必须写完整名称，没有 <code>windows-ucrt</code> 这类简称，也不会根据本机恰好安装的编译器改选目标。三个 Windows 目标生成 Win64 ABI 的 PE32+ 程序，要求 Windows 10 x64 及以上；它们之间的产物不能混用，即使 CRT 相同。</li>
+  <li>Windows 目标的可执行文件默认名追加 <code>.exe</code>（包括测试程序），显式 <code>-o</code> 的路径保持原样。</li>
+  <li>Windows 目标动态依赖所选 CRT，<code>--link-mode static</code> 不适用。使用 C++ 的 MSVC 程序部署时需要附带实际依赖的 VCRuntime/MSVC STL DLL。</li>
+</ul>
+
+<h2 id="initialization-order">初始化顺序</h2>
+<ul>
+  <li>需要运行期计算的顶层属性在进入 <code>main</code> 之前初始化。Cone 按依赖优先的拓扑顺序处理，平级的按坐标排序；同一 Cone 内的顺序由声明的身份决定，<strong>与文件书写顺序无关</strong>。</li>
+  <li>初始化中读取另一个尚未初始化的属性时，会先完成那个属性的初始化。直接的初始化依赖环是编译错误，经函数调用形成的间接环在运行期报错。</li>
+  <li><code>object</code> 与 companion 在首次访问时初始化，见 <a href="classes.html#objects">object 与 companion</a>。</li>
+  <li>任何启动初始化失败时不执行 <code>main</code>，程序以退出码 1 结束。</li>
+</ul>

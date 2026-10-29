@@ -1,0 +1,235 @@
+<!-- title: 原生互操作; nav: reference; layout: reference; description: Scoop 与 C 互操作：@Extern 绑定原生函数与全局变量、@Unsafe/@Safe、@NoGC、@GCLeaf、errno 捕获、C 类型映射、@CLayout、Ptr/FunPtr/addressOf、数据指针借用、Cone 中的 C/C++ 源码与系统库，以及 Scoop ABI。 -->
+<h1>原生互操作</h1>
+<p class="intro">Scoop 通过 <code>@Extern</code> 直接绑定 C 符号，不需要生成胶水代码。C ABI 的边界上只能出现不含托管引用的类型；对原生内存的操作必须写在 <code>@Unsafe</code> 上下文中。Cone 还可以携带 C/C++ 源码，与 Scoop 代码一起编译链接。</p>
+
+<h2 id="extern">@Extern 函数</h2>
+<pre><code class="language-scoop">@CLayout
+struct DivResult(val quot: Int, val rem: Int)
+
+@Extern(name = "div")
+fun cDiv(numerator: Int, denominator: Int): DivResult
+
+@Extern(name = "strlen")
+fun cStrlen(text: Ptr&lt;Int8&gt;): ULong
+
+fun main() {
+    @Unsafe {
+        val d = cDiv(17, 5)
+        println(f"${d.quot} ${d.rem}")              // 3 2
+        val n = "héllo".withCString { p -&gt; @Unsafe { return@withCString cStrlen(p) } }
+        println(n)                                  // 6：UTF-8 字节数
+    }
+}</code></pre>
+<pre data-check="skip"><code class="language-scoop">annotation class Extern(val lib: String = "", val name: String = "", val abi: String = "c", val captureErrno: Boolean = false)</code></pre>
+<ul>
+  <li><code>@Extern</code> 只能用于顶层、非泛型、非挂起的函数，函数体必须省略。<code>name</code> 是原生符号名，省略时使用声明名；<code>lib</code> 是逻辑库名（不是路径），对应清单中的 <a href="#native-libraries"><code>[[native.libraries]]</code></a>，空串表示默认命名空间（如 libc）。</li>
+  <li>C ABI（默认 <code>abi = "c"</code>）的 extern 函数是 <strong>unsafe</strong> 的，只能在 unsafe 上下文中调用。</li>
+  <li>签名中的每个参数与结果都必须是 <a href="#c-types">C-FFI-safe</a> 的类型；<code>String</code>、数组、class 等托管引用出现在 C 边界上是编译错误。</li>
+  <li>不支持 C 的可变参数（<code>printf</code> 式的 <code>...</code>），需要时用 C 包装函数。Scoop 的 <code>vararg</code> 也不能用于 C extern。</li>
+  <li>extern 声明可以带 Scoop 默认参数，它们在调用方求值，原生函数总是收到完整的参数列表。</li>
+  <li>同一程序中引用同一原生符号的多个声明，签名必须一致，否则是链接错误。</li>
+  <li><code>@CallingConvention(name)</code> 可以为 extern 指定调用约定。</li>
+</ul>
+
+<h2 id="unsafe">@Unsafe 与 @Safe</h2>
+<p><strong>unsafe 操作</strong>包括调用 C extern、调用标注 <code>@Unsafe</code> 的函数（例如 <code>Ptr.load</code>、<code>addressOf</code>）以及读写 unsafe 的构造函数或访问器。它们只能出现在 <strong>unsafe 上下文</strong>中：</p>
+<ul>
+  <li>标注 <code>@Unsafe</code> 的函数、构造函数或访问器的函数体；</li>
+  <li><code>@Unsafe { … }</code> 语句块。</li>
+</ul>
+<p><code>@Safe</code> 在 unsafe 上下文中重新引入安全约束。几点需要注意：</p>
+<ul>
+  <li><code>@Unsafe { … }</code> 是<strong>语句</strong>，不是表达式，不能用作值；需要结果时在块中赋值给外部的 <code>var</code>，或在 lambda 中用 <code>return@label</code> 返回。</li>
+  <li>unsafe 上下文<strong>不延伸</strong>到其中的 lambda 与局部函数：lambda 是独立的函数值，其中的 unsafe 调用需要自己的 <code>@Unsafe</code> 块（如上例的 <code>withCString</code>）。</li>
+  <li>标注 <code>@Unsafe</code> 的函数在调用方同样需要 unsafe 上下文。</li>
+</ul>
+
+<h2 id="c-types">C 类型映射</h2>
+<div class="table-wrap"><table>
+  <tr><th>Scoop</th><th>C</th></tr>
+  <tr><td><code>Int8</code> <code>Int16</code> <code>Int</code> <code>Long</code></td><td><code>int8_t</code> <code>int16_t</code> <code>int32_t</code> <code>int64_t</code></td></tr>
+  <tr><td><code>UInt8</code> <code>UInt16</code> <code>UInt</code> <code>ULong</code></td><td><code>uint8_t</code> <code>uint16_t</code> <code>uint32_t</code> <code>uint64_t</code></td></tr>
+  <tr><td><code>Float</code> / <code>Double</code></td><td><code>float</code> / <code>double</code></td></tr>
+  <tr><td><code>Boolean</code></td><td><code>bool</code></td></tr>
+  <tr><td><code>Char</code></td><td><code>uint32_t</code>（必须是合法的 Unicode 标量）</td></tr>
+  <tr><td>整型枚举 <code>enum E: I</code></td><td>与 <code>I</code> 相同（只能传入已声明的值）</td></tr>
+  <tr><td><code>Ptr&lt;T&gt;</code></td><td><code>T *</code>，非空</td></tr>
+  <tr><td><code>Ptr&lt;Unit&gt;</code></td><td><code>void *</code> 与不透明句柄</td></tr>
+  <tr><td><code>Option&lt;Ptr&lt;T&gt;&gt;</code></td><td>可以为 <code>NULL</code> 的指针（<code>None</code> 即 <code>NULL</code>）</td></tr>
+  <tr><td><code>FunPtr&lt;F&gt;</code> / <code>Option&lt;FunPtr&lt;F&gt;&gt;</code></td><td>函数指针 / 可以为 <code>NULL</code> 的函数指针</td></tr>
+  <tr><td><code>@CLayout</code> struct</td><td>按值传递的 C struct</td></tr>
+  <tr><td><code>Unit</code>（仅结果）</td><td><code>void</code></td></tr>
+</table></div>
+<p>Scoop 的整数宽度是固定的，不会把 <code>Int</code> 映射为 C 的 <code>int</code> 或 <code>long</code>：绑定 C 函数时请按其头文件中的实际宽度选择类型，例如 64 位平台上的 <code>size_t</code> 对应 <code>ULong</code>；注意 Windows 是 LLP64，C 的 <code>long</code> 在 Windows 上是 32 位（<code>Int</code>），在 macOS/Linux 上是 64 位（<code>Long</code>），这类类型需要用 <a href="modules.html#source-selection">按目标选择的源码</a>分别声明。裸 <code>Ptr</code> 永远非空，原生函数声明返回 <code>Ptr&lt;T&gt;</code> 却返回了 <code>NULL</code> 属于契约违反，可能返回 <code>NULL</code> 时请声明为 <code>Option&lt;Ptr&lt;T&gt;&gt;</code>。零大小类型（除作为结果的 <code>Unit</code> 外）不能出现在 C 边界上。</p>
+
+<h3 id="clayout">@CLayout</h3>
+<p><code>@CLayout(aligned = 0L, packed = 0L)</code> 让 struct 按 C 规则布局，可以按值传给 C 函数或通过指针共享。所有字段必须递归地具有稳定的 C 表示，不能包含托管引用或零大小字段；没有字段的 <code>@CLayout</code> struct 是编译错误。<code>aligned</code> 提高 struct 的最小对齐，<code>packed</code> 限制字段的对齐，取值为 <code>1L</code>、<code>2L</code>、<code>4L</code>、<code>8L</code> 或 <code>16L</code>，<code>0L</code> 表示不调整。</p>
+
+<h2 id="nogc">@NoGC</h2>
+<p><code>@NoGC</code> 断言函数不与 GC 交互：不读写任何托管引用，也不分配托管对象。编译器在编译期检查这一点。</p>
+<ul>
+  <li>参数、结果与局部值都必须是 GC-free 的类型（递归地不含托管引用）。class 的方法有隐式的引用接收者，因此 <code>@NoGC</code> 成员函数只能属于值类型。</li>
+  <li>用于 struct 或 enum 时，表示该类型必须是 GC-free 的；泛型类型在每个具体实例上检查。</li>
+  <li>泛型 <code>@NoGC</code> 函数在每个具体实例上检查：<code>identity&lt;Int&gt;</code> 合法，<code>identity&lt;String&gt;</code> 是编译错误。</li>
+  <li>作为原生回调地址的函数必须是 <code>@NoGC</code> 的，见 <a href="#funptr">FunPtr</a>。</li>
+</ul>
+<pre><code class="language-scoop">@NoGC
+fun clamp(value: Int, low: Int, high: Int): Int = if (value &lt; low) low else if (value &gt; high) high else value
+
+@NoGC
+struct Sample(val time: Long, val value: Double)
+
+fun main() {
+    println(clamp(12, 0, 10))
+}</code></pre>
+<pre data-check="error"><code class="language-scoop">@NoGC
+fun size(text: String): Long = text.byteLength    // 编译错误：String 是托管引用</code></pre>
+
+<h2 id="gcleaf">@GCLeaf</h2>
+<p>普通的 C extern 调用会让当前线程进入“原生安全”状态，使 GC 可以在调用期间并发工作。<code>@GCLeaf</code> 为短小的 C 函数省去这次状态切换，调用开销接近直接的 C 调用。作为交换，FFI 作者必须保证该函数及其同步调用的一切：不回调 Scoop、不进入运行时，不阻塞等待（I/O、锁、sleep、join 等），并且尽快返回——执行缓慢会延迟 GC。违反这些约束属于未定义行为，编译器无法检查。</p>
+<pre><code class="language-scoop">@GCLeaf
+@Extern(name = "abs")
+fun cAbs(x: Int): Int
+
+fun main() {
+    @Unsafe {
+        println(cAbs(-4))
+    }
+}</code></pre>
+
+<h2 id="errno">捕获 errno</h2>
+<p><code>captureErrno = true</code> 让调用同时返回 C 函数返回时的 <code>errno</code>。声明的结果必须写成 <code>(R, Int)</code>，其中 <code>R</code> 是原生函数的结果类型（<code>void</code> 写作 <code>Unit</code>）：</p>
+<pre><code class="language-scoop">@Extern(name = "close", captureErrno = true)
+fun closeWithErrno(fd: Int): (Int, Int)
+
+fun main() {
+    @Unsafe {
+        val (result, error) = closeWithErrno(-1)
+        println(f"${result} ${error}")     // -1 和 EBADF 的值
+    }
+}</code></pre>
+<p>调用前 <code>errno</code> 被清零，原生函数返回后立即读取，因此结果不受之后的分配、GC 或其他调用影响。是否失败仍由 C 函数的返回值决定，Scoop 不会自动抛出异常。只有 C ABI extern 函数可以启用它。</p>
+
+<h2 id="pointers">Ptr 与 addressOf</h2>
+<p><code>Ptr&lt;T : value&gt;</code> 是指向 GC-free 值类型的原始指针，本身也是值类型。除 <code>==</code> 外，它的操作都是 unsafe 的：</p>
+<div class="table-wrap"><table>
+  <tr><th>操作</th><th>说明</th></tr>
+  <tr><td><code>p.load()</code> / <code>p.store(v)</code></td><td>读写所指的值</td></tr>
+  <tr><td><code>p.load(i)</code> / <code>p.store(i, v)</code></td><td>按元素偏移读写</td></tr>
+  <tr><td><code>p + n</code> / <code>p - n</code></td><td>按<strong>元素个数</strong>移动（字节偏移为 <code>n * sizeOf&lt;T&gt;()</code>）</td></tr>
+  <tr><td><code>p.cast&lt;U&gt;()</code></td><td>重新解释指针类型</td></tr>
+  <tr><td><code>p.toULong()</code> / <code>Ptr&lt;T&gt;(raw)</code></td><td>与整数地址互相转换；<code>raw</code> 必须非零</td></tr>
+  <tr><td><code>addressOf(v)</code></td><td>取局部变量、参数、全局变量或值类型方法中 <code>this</code> 的地址</td></tr>
+  <tr><td><code>sizeOf&lt;T&gt;()</code> / <code>alignOf&lt;T&gt;()</code></td><td>类型的大小与对齐（字节，<code>ULong</code>），编译期求值，不需要 unsafe</td></tr>
+</table></div>
+<pre><code class="language-scoop">fun main() {
+    @Unsafe {
+        var counter = 41
+        val p = addressOf(counter)
+        p.store(p.load() + 1)
+        println(counter)                           // 42
+    }
+    println(sizeOf&lt;(Int, Long)&gt;())                 // 16
+}</code></pre>
+<ul>
+  <li><code>addressOf</code> 的实参必须是可寻址的变量，不能是临时值或计算结果。值类型方法中 <code>addressOf(this)</code> 指向方法的局部副本，而不是调用方的变量。</li>
+  <li>没有空指针值：<code>Ptr(0uL)</code> 是编译错误（运行期为零是未定义行为），可空指针用 <code>Option&lt;Ptr&lt;T&gt;&gt;</code>。</li>
+  <li>悬垂、未对齐、越界的访问以及与其他线程的数据竞争，都由 unsafe 代码的作者负责。</li>
+</ul>
+
+<h3 id="data-borrows">借用托管数据的指针</h3>
+<p>GC 可能移动托管对象。需要把数组或字符串的内容交给 C 时，使用有作用域的借用，借用期间对象被固定：</p>
+<div class="table-wrap"><table>
+  <tr><th>函数</th><th>传给 block 的值</th></tr>
+  <tr><td><code>MutableArray&lt;T&gt;.withDataPointer { p, count -&gt; … }</code></td><td>可写的元素指针与元素个数</td></tr>
+  <tr><td><code>Array&lt;T&gt;.withDataPointer { p, count -&gt; … }</code></td><td>只读的元素指针与元素个数</td></tr>
+  <tr><td><code>String.withUtf8Bytes { p, length -&gt; … }</code></td><td>只读的 UTF-8 字节指针与字节数（不保证以零结尾）</td></tr>
+  <tr><td><code>String.withCString { p -&gt; … }</code></td><td>以零结尾的副本；字符串含 U+0000 时抛出 <code>IllegalArgumentException</code></td></tr>
+  <tr><td><code>String.fromCString(p)</code> / <code>String.fromUtf8(p, length)</code></td><td>从原生内存复制并严格解码为新字符串</td></tr>
+</table></div>
+<p>这些函数都是 unsafe 的。指针只在 block 执行期间有效，保存到外部之后使用属于未定义行为。</p>
+
+<h2 id="funptr">FunPtr 与回调</h2>
+<p><code>FunPtr&lt;F&gt;</code> 是 C 函数指针，<code>F</code> 是描述原生签名的普通函数类型，各参数与结果必须是 C-FFI-safe 的。期望类型为 <code>FunPtr&lt;F&gt;</code> 时，<code>::name</code> 直接解析为该函数的原生地址：</p>
+<pre><code class="language-scoop">@Extern(name = "qsort")
+fun cQsort(base: Ptr&lt;Unit&gt;, count: ULong, size: ULong, compare: FunPtr&lt;(Ptr&lt;Unit&gt;, Ptr&lt;Unit&gt;) -&gt; Int&gt;)
+
+@NoGC
+fun compareInts(a: Ptr&lt;Unit&gt;, b: Ptr&lt;Unit&gt;): Int {
+    @Unsafe {
+        val x = a.cast&lt;Int&gt;().load()
+        val y = b.cast&lt;Int&gt;().load()
+        return if (x &lt; y) -1 else if (x &gt; y) 1 else 0
+    }
+}
+
+fun main() {
+    val values: MutableArray&lt;Int&gt; = [5, 3, 9, 1]
+    @Unsafe {
+        values.withDataPointer { p, count -&gt;
+            @Unsafe { cQsort(p.cast&lt;Unit&gt;(), count.toULong(), sizeOf&lt;Int&gt;(), ::compareInts) }
+        }
+    }
+    for (v in values) print(f"${v} ")             // 1 3 5 9
+    println("")
+}</code></pre>
+<ul>
+  <li>目标必须是 <strong><code>@NoGC</code> 的顶层具名函数</strong>，不能是泛型、挂起、extern、成员或扩展函数；签名必须与 <code>F</code> 完全相同。lambda、局部函数、绑定引用和已有的函数值都不能转换为 <code>FunPtr</code>。</li>
+  <li>没有期望类型时，<code>val f = ::name</code> 得到的是普通的托管函数值，之后不能再转换为 <code>FunPtr</code>。</li>
+  <li><code>FunPtr</code> 没有构造函数，也不能在 Scoop 中调用；它只用于传给原生代码。这种静态回调只能由原生方在同一线程上同步调用。</li>
+  <li>需要原生代码稍后、或在其他线程调用托管闭包时，使用核心库的 <code>foreignCallback</code> 注册协议：它返回静态 trampoline 与不透明 context 的组合，由原生 API 的 user-data 参数携带，并显式管理所有权（<code>retainForeignCallback</code>、<code>releaseForeignCallback</code>）。</li>
+</ul>
+
+<h2 id="globals">原生全局变量</h2>
+<ul>
+  <li><code>@Global var x: T = …</code> 与 <code>@ThreadLocal var x: T = …</code> 声明可以取地址的原生全局存储或线程局部存储。类型必须是 GC-free 的，初值必须是编译期常量，不能带访问器或委托。</li>
+  <li><code>@Extern</code> 也可以用于顶层 <code>val</code>/<code>var</code>，访问库中的数据符号；可写的 extern 变量还需要 <code>@Global</code> 或 <code>@ThreadLocal</code> 说明是否线程局部，类型必须是 C-FFI-safe 的。</li>
+  <li>普通的顶层属性不需要这些注解，可以保存托管引用，但不能取地址。</li>
+</ul>
+<pre><code class="language-scoop">@Global
+var callCount: Long = 0L
+
+fun main() {
+    @Unsafe {
+        val p = addressOf(callCount)
+        p.store(p.load() + 1L)
+    }
+    println(callCount)
+}</code></pre>
+
+<h2 id="interior-mutable">@InteriorMutable</h2>
+<p>标注 <code>@InteriorMutable</code> 的 struct 表示其内容可能被改变（例如包含原子字段，或会被 C 代码修改），不再保证值类型的不可变性。这样的 struct 及其值只能在 unsafe 上下文中使用；复制仍然产生两份独立的存储。</p>
+
+<h2 id="native-sources">Cone 中的 C/C++ 源码</h2>
+<p>manifest Cone 可以在 <code>[native]</code> 中配置随 Cone 编译的 C/C++ 源码：</p>
+<pre><code class="language-toml">[native]
+include = ["native/include", { path = "native/linux", when = { os = "linux" } }]
+c_flags = ["-O2", "-DUSE_FAST_PATH=1"]
+cxx = true                       # 启用 C++
+cxx_flags = ["-std=c++20"]
+
+[[native.sources]]
+path = "native/codec.c"
+
+[[native.sources]]
+path = "native/engine.cpp"
+
+[[native.sources]]
+path = "native/simd_x86.c"
+when = { arch = "x86_64" }
+
+[[native.libraries]]
+name = "z"                        # 对应 @Extern(lib = "z")
+kind = "dynamic"                  # default | dynamic | static | framework</code></pre>
+<ul>
+  <li><code>native.sources</code> 逐个列出文件，<code>.c</code> 按 C 编译，<code>.cc</code>/<code>.cpp</code>/<code>.cxx</code>/<code>.C</code> 按 C++ 编译；不会递归发现其他源码。<code>when</code> 与 <a href="modules.html#source-selection">源码选择</a>的条件相同。</li>
+  <li>C++ 必须用 <code>cxx = true</code> 显式启用，C++ 链接需求会传递给最终程序。C++ 支持 Darwin/AArch64（libc++）、Linux/x86_64 GNU（libstdc++）以及三个 Windows 目标（MSVC 目标使用 MSVC STL，LLVM-MinGW 目标使用 libc++），<strong>不支持 musl</strong>。C++ 代码通过 <code>extern "C"</code> 包装函数与 Scoop 互操作，C++ 异常不能穿越 FFI 边界。</li>
+  <li>编译选项按 argv 元素传递，不经过 shell。目标、sysroot、输出位置由工具链管理，不能通过选项覆盖。MSVC 目标的选项使用 Microsoft 驱动的写法（<code>/I</code>、<code>/FI</code>、<code>/D</code>、<code>/U</code> 等）；默认使用 <code>/MD</code>、C11/C++20、<code>/EHsc</code> 与 UTF-8 源码字符集，不能用选项切换 <code>/MT</code>、<code>/MDd</code> 或 LTCG。</li>
+  <li>预处理器为当前目标定义 <code>SCOOP_TARGET_OS_DARWIN</code>/<code>SCOOP_TARGET_OS_LINUX</code>、<code>SCOOP_TARGET_ARCH_AARCH64</code>/<code>SCOOP_TARGET_ARCH_X86_64</code> 与 <code>SCOOP_TARGET_ENV_NONE</code>/<code>_GNU</code>/<code>_MUSL</code>；Windows 目标定义 <code>SCOOP_TARGET_OS_WINDOWS</code>，以及 <code>SCOOP_TARGET_ENV_MSVC_UCRT</code>、<code>SCOOP_TARGET_ENV_LLVM_MINGW_UCRT</code> 或 <code>SCOOP_TARGET_ENV_LLVM_MINGW_MSVCRT</code> 之一。公开的运行时头文件 <code>scoop_rt.h</code> 自动可用。</li>
+  <li>单文件模式不读取 <code>[native]</code>。</li>
+</ul>
+<h3 id="native-libraries">系统库</h3>
+<p><code>[[native.libraries]]</code> 声明要链接的逻辑库名，与 <code>@Extern(lib = …)</code> 合并处理，需求沿依赖闭包传递。库依次在显式的库目录、Scoop sysroot 与目标平台的默认目录中查找；交叉编译时不会回退到宿主的系统目录。<code>framework</code> 只用于 macOS。Windows 上逻辑名 <code>L</code> 按 <code>L.obj</code>、<code>L.o</code>、<code>L.lib</code>、<code>libL.a</code>、<code>libL.dll.a</code> 查找，既可以是静态库也可以是 DLL 的 import library；系统 DLL 写作 <code>name = "user32"</code> 这样的逻辑名。<code>@Extern</code> 也可以访问 DLL 导出的数据符号。</p>
+
+<h2 id="scoop-abi">Scoop ABI</h2>
+<p><code>@Extern(abi = "scoop")</code> 声明使用 Scoop 自身调用约定的原生函数：托管引用直接以引用值传递，被调方可以读取类型描述，并按运行时的 native-root 协议进入可能触发 GC 的运行时操作。它主要供运行时与核心库的实现者使用，调用点不要求 unsafe（除非声明显式标注 <code>@Unsafe</code>）；违反借用与保活规则属于运行时 ABI 错误。相关的 <code>pin</code>/<code>unpin</code>、<code>getGcHandle</code>/<code>releaseGcHandle</code> 与回调注册协议见 <a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-SPEC.md#14-scoop-abi-ffi">语言规范第 14 章</a>和<a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-RUNTIME-SPEC.md">运行时规范</a>。</p>

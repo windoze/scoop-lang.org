@@ -1,0 +1,232 @@
+<!-- title: 运算符与相等; nav: reference; layout: reference; description: Scoop 的运算符约定：operator 函数、表达式展开、比较、下标、invoke、复合赋值与自增自减、infix、componentN、iterator；相等 ==、Equals、ToString、Hash 与 core 运算符接口。 -->
+<h1>运算符与相等</h1>
+<p class="intro">Scoop 的运算符大多是对 <code>operator</code> 函数的调用约定：<code>a + b</code> 就是 <code>a.plus(b)</code>。函数必须显式标注 <code>operator</code>，只有约定的名称不够。相等 <code>==</code> 同样通过成员 <code>operator fun equals</code> 决议，<code>Any</code> 没有任何隐式的相等、字符串化或哈希能力。</p>
+
+<h2 id="declaring">声明运算符</h2>
+<pre><code class="language-scoop">struct Vec(val x: Int, val y: Int) : ToString {
+    operator fun plus(other: Vec): Vec = Vec(x + other.x, y + other.y)
+    operator fun unaryMinus(): Vec = Vec(-x, -y)
+    operator fun times(k: Int): Vec = Vec(x * k, y * k)
+    operator fun compareTo(other: Vec): Long = lengthSquared().compareTo(other.lengthSquared())
+    fun lengthSquared(): Long = (x * x + y * y).toLong()
+    public override fun toString(): String = f"(${x}, ${y})"
+}
+
+fun main() {
+    val a = Vec(1, 2)
+    val b = Vec(3, 4)
+    println(a + b)        // (4, 6)
+    println(-a * 3)       // (-3, -6)
+    println(a &lt; b)        // true
+}</code></pre>
+<p>除 <code>equals</code> 外，运算符函数必须是成员函数或扩展函数，可以是泛型、挂起或 infix 的。<code>operator</code> 标记属于覆写契约，覆写时必须保持一致。名称不在下表中、参数个数或结果类型不符合要求，都是声明处的编译错误。</p>
+<div class="table-wrap"><table>
+  <tr><th>名称</th><th>参数个数</th><th>约束</th></tr>
+  <tr><td><code>unaryPlus</code> <code>unaryMinus</code> <code>not</code></td><td>0</td><td></td></tr>
+  <tr><td><code>inc</code> <code>dec</code></td><td>0</td><td>结果必须是接收者类型的子类型</td></tr>
+  <tr><td><code>plus</code> <code>minus</code> <code>times</code> <code>div</code> <code>rem</code></td><td>1</td><td></td></tr>
+  <tr><td><code>rangeTo</code> <code>rangeUntil</code></td><td>1</td><td></td></tr>
+  <tr><td><code>contains</code></td><td>1</td><td>返回 <code>Boolean</code></td></tr>
+  <tr><td><code>get</code></td><td>至少 1</td><td>可以有默认值与 <code>vararg</code></td></tr>
+  <tr><td><code>set</code></td><td>至少 2</td><td>返回 <code>Unit</code>；最后一个参数是写入的值</td></tr>
+  <tr><td><code>invoke</code></td><td>任意</td><td>完整的调用参数协议</td></tr>
+  <tr><td><code>plusAssign</code> <code>minusAssign</code> <code>timesAssign</code> <code>divAssign</code> <code>remAssign</code></td><td>1</td><td>返回 <code>Unit</code></td></tr>
+  <tr><td><code>compareTo</code></td><td>1</td><td>返回 <code>Long</code></td></tr>
+  <tr><td><code>equals</code></td><td>1</td><td>返回 <code>Boolean</code>；必须是成员，见<a href="#equality">相等</a></td></tr>
+  <tr><td><code>component1</code>、<code>component2</code>……</td><td>0</td><td>用于 class 的位置解构</td></tr>
+  <tr><td><code>iterator</code></td><td>0</td><td>结果实现 <code>Iterator&lt;T&gt;</code>，用于 <code>for</code></td></tr>
+</table></div>
+
+<h2 id="expansion">表达式展开</h2>
+<div class="table-wrap"><table>
+  <tr><th>表达式</th><th>展开为</th></tr>
+  <tr><td><code>+a</code> <code>-a</code> <code>!a</code></td><td><code>a.unaryPlus()</code> <code>a.unaryMinus()</code> <code>a.not()</code></td></tr>
+  <tr><td><code>a + b</code> <code>a - b</code> <code>a * b</code> <code>a / b</code> <code>a % b</code></td><td><code>a.plus(b)</code> <code>a.minus(b)</code> <code>a.times(b)</code> <code>a.div(b)</code> <code>a.rem(b)</code></td></tr>
+  <tr><td><code>a..b</code> <code>a..&lt;b</code></td><td><code>a.rangeTo(b)</code> <code>a.rangeUntil(b)</code></td></tr>
+  <tr><td><code>a in b</code> <code>a !in b</code></td><td><code>b.contains(a)</code> <code>!b.contains(a)</code>（先求值 <code>b</code>）</td></tr>
+  <tr><td><code>a[i, j]</code></td><td><code>a.get(i, j)</code></td></tr>
+  <tr><td><code>a[i, j] = v</code></td><td><code>a.set(i, j, v)</code></td></tr>
+  <tr><td><code>a(args)</code></td><td>函数值调用，或 <code>a.invoke(args)</code></td></tr>
+  <tr><td><code>a &lt; b</code> <code>a &lt;= b</code> <code>a &gt; b</code> <code>a &gt;= b</code></td><td><code>a.compareTo(b)</code> 的结果与 <code>0L</code> 比较</td></tr>
+  <tr><td><code>a == b</code> <code>a != b</code></td><td>成员 <code>a.equals(b)</code> / 其结果取反</td></tr>
+</table></div>
+<p>展开后按普通的成员与扩展调用决议，只考虑带有对应 <code>operator</code> 标记的候选，并完整支持默认参数、<code>vararg</code> 与泛型。以下运算<strong>不能重载</strong>：<code>&amp;&amp;</code>、<code>||</code>、<code>===</code>、<code>!==</code>、赋值 <code>=</code>、<code>?:</code>、<code>!!</code>、<code>?.</code>、<code>is</code>、<code>as</code>。</p>
+<pre><code class="language-scoop">class Grid(val width: Long) {
+    private val cells = MutableArray&lt;Int&gt;(width * width) { 0 }
+    operator fun get(row: Long, col: Long): Int = cells[row * width + col]
+    operator fun set(row: Long, col: Long, value: Int) {
+        cells[row * width + col] = value
+    }
+    operator fun contains(value: Int): Boolean {
+        for (c in cells) if (c == value) return true
+        return false
+    }
+}
+
+class Adder(val base: Int) {
+    operator fun invoke(x: Int): Int = base + x
+}
+
+fun main() {
+    val grid = Grid(3L)
+    grid[1, 2] = 7
+    grid[1, 2] += 1
+    println(grid[1, 2])      // 8
+    println(8 in grid)       // true
+    val add5 = Adder(5)
+    println(add5(10))        // 15
+}</code></pre>
+<p><code>e(args)</code> 中，若 <code>e</code> 的类型是函数类型就直接调用；否则查找其 <code>operator fun invoke</code>。一次调用至多应用一次 <code>invoke</code>：若 <code>invoke</code> 返回的仍是可调用的值，需要再写一组括号。</p>
+
+<h2 id="compound-assignment">复合赋值与自增自减</h2>
+<p><code>a op= b</code>（<code>op</code> 为 <code>+ - * / %</code>）同时考虑 <code>opAssign</code> 与普通 <code>op</code>：</p>
+<ol>
+  <li>只有 <code>opAssign</code> 适用时，调用它，不写回，因此接收者可以是 <code>val</code>；</li>
+  <li>只有 <code>op</code> 适用时，计算 <code>a op b</code> 并写回 <code>a</code>，此时 <code>a</code> 必须可写，结果必须能赋给 <code>a</code> 的类型；</li>
+  <li>两者都适用时是<strong>歧义</strong>错误，编译器不会擅自偏好其中一个。</li>
+</ol>
+<p><code>++a</code>/<code>--a</code> 读取旧值、调用 <code>inc</code>/<code>dec</code>、写回新值，结果是新值；<code>a++</code>/<code>a--</code> 的结果是旧值。操作数必须是可写的位置；接收者和下标只求值一次。下标位置的复合赋值通过同一接收者的 <code>get</code> 与 <code>set</code> 完成。</p>
+<pre><code class="language-scoop">class Bag {
+    val items = ArrayList&lt;Int&gt;()
+    operator fun plusAssign(value: Int) {
+        items.add(value)
+    }
+}
+
+struct Counter(val n: Int) {
+    operator fun inc(): Counter = Counter(n + 1)
+}
+
+fun main() {
+    val bag = Bag()            // val 也可以：plusAssign 不写回
+    bag += 3
+    bag += 4
+    var c = Counter(0)
+    c++
+    val after = ++c                        // 前缀形式的结果是新值
+    println(f"${bag.items.size} ${c.n} ${after.n}")   // 2 2 2
+}</code></pre>
+
+<h2 id="infix">infix 函数</h2>
+<p>标注 <code>infix</code> 的成员或扩展函数可以写成 <code>a name b</code>，等价于 <code>a.name(b)</code>。infix 函数必须恰有一个必需的、非 <code>vararg</code> 的参数，调用时必须显式写出接收者（在当前对象上调用写作 <code>this name b</code>）。中缀调用左结合，优先级见<a href="expressions.html#precedence">运算符优先级</a>。</p>
+<pre><code class="language-scoop">struct Money(val cents: Long) {
+    infix fun split(parts: Long): Money = Money(cents / parts)
+}
+
+fun main() {
+    val share = Money(1000L) split 4L
+    println(share.cents)               // 250
+    println(0xFF and 0x0F)             // 整数位运算也是 infix 函数
+}</code></pre>
+
+<h2 id="components">位置解构</h2>
+<p>class 与接口可以通过 <code>operator fun component1()</code>、<code>component2()</code>……支持 <code>val (a, b) = x</code> 形式的位置解构。写出的 N 个位置会依次调用 <code>component1</code> 到 <code>componentN</code>，包括写成 <code>_</code> 的位置；这种解构不能使用 <code>..</code>。struct 与 tuple 的解构是内建的，不会调用 <code>componentN</code>。</p>
+<pre><code class="language-scoop">class Entry(val key: String, val value: Int) {
+    operator fun component1(): String = key
+    operator fun component2(): Int = value
+}
+
+fun main() {
+    val (k, v) = Entry("answer", 42)
+    println(f"${k}=${v}")
+}</code></pre>
+
+<h2 id="iteration">迭代</h2>
+<p><code>for (x in source)</code> 调用 <code>source</code> 上唯一的 <code>operator fun iterator()</code>，返回值必须实现 <code>Iterator&lt;T&gt;</code>，其 <code>next()</code> 返回 <code>Some(值)</code> 或在耗尽时返回 <code>None</code>。实现 <code>Iterable&lt;T&gt;</code> 是提供 <code>iterator</code> 的常规方式：</p>
+<pre><code class="language-scoop">class Countdown(val from: Int) : Iterable&lt;Int&gt; {
+    public override operator fun iterator(): Iterator&lt;Int&gt; = CountdownIterator(from)
+}
+
+class CountdownIterator(var current: Int) : Iterator&lt;Int&gt; {
+    public override fun next(): Option&lt;Int&gt; {
+        if (current &lt; 0) return None
+        val value = current
+        current--
+        return Some(value)
+    }
+}
+
+fun main() {
+    for (i in Countdown(3)) print(i)     // 3210
+    println("")
+}</code></pre>
+
+<h2 id="equality">相等</h2>
+<p><code>a == b</code> 从 <code>a</code> 的<strong>静态类型</strong>（包括继承的成员与类型参数的上界）中查找带 <code>operator</code> 标记的成员 <code>equals</code>，按普通重载规则选出唯一目标并调用；<code>a != b</code> 对结果取反。两侧各求值一次，不交换操作数。</p>
+<ul>
+  <li>找不到目标是编译错误。不存在 <code>Any.equals</code>，也不会回退到地址比较：静态类型为 <code>Any</code> 的两个值不能用 <code>==</code> 比较。</li>
+  <li><code>operator fun equals</code> 必须是成员函数，恰有一个参数并返回 <code>Boolean</code>，不能是泛型或挂起函数；扩展函数不能声明 <code>equals</code> 运算符。</li>
+  <li><strong>值类型</strong>（struct、enum、tuple）在字段都可以比较时自动获得结构相等，见<a href="values.html#equality">结构相等</a>。</li>
+  <li><strong>class 不会自动获得相等</strong>：需要按值比较时自己声明 <code>operator fun equals</code>；需要比较是否同一对象时使用 <code>===</code>。</li>
+  <li><code>===</code> 与 <code>!==</code> 比较引用 identity，只能用于引用类型，不能重载。同一对象的不同接口视图相等。</li>
+  <li>编译器不假设用户的 <code>equals</code> 满足自反、对称或传递性，不会据此优化比较。</li>
+</ul>
+
+<h3 id="equals-interface">Equals 接口</h3>
+<p>泛型代码通过普通接口 <code>Equals&lt;T&gt;</code> 表达“可以比较”的能力。<code>T : Equals&lt;T&gt;</code> 使函数体中可以使用 <code>==</code>：</p>
+<pre data-check="skip"><code class="language-scoop">public interface Equals&lt;T&gt; {
+    public operator fun equals(other: T): Boolean
+}</code></pre>
+<pre><code class="language-scoop">class Money(val cents: Long) : Equals&lt;Money&gt;, Hash, ToString {
+    public override operator fun equals(other: Money): Boolean = cents == other.cents
+    public override fun hash(): Long = cents.hash()
+    public override fun toString(): String = f"${cents / 100L}.${cents % 100L}"
+}
+
+fun &lt;T : Equals&lt;T&gt;&gt; countOf(items: Array&lt;T&gt;, target: T): Int {
+    var n = 0
+    for (item in items) if (item == target) n++
+    return n
+}
+
+fun main() {
+    val prices = [Money(150L), Money(299L), Money(150L)]
+    println(countOf(prices, Money(150L)))      // 2
+    println(Money(150L) === Money(150L))       // false：不同对象
+    println(Money(1234L))                      // 12.34
+}</code></pre>
+<ul>
+  <li>类型必须<strong>显式声明</strong>实现 <code>Equals&lt;T&gt;</code>；只有同签名的 <code>equals</code> 方法，或值类型自动获得的结构相等，都<strong>不会</strong>使类型满足 <code>T : Equals&lt;T&gt;</code>。</li>
+  <li>核心库中 <code>Boolean</code>、<code>Char</code>、整数、浮点、<code>String</code>、<code>Unit</code> 与 <code>Ptr&lt;T&gt;</code> 实现了 <code>Equals</code>；数组、函数值没有相等。</li>
+  <li><code>Equals&lt;Base&gt;</code> 不会自动成为 <code>Equals&lt;Derived&gt;</code>。</li>
+  <li>也可以自定义声明了 <code>operator fun equals</code> 的接口作为上界，运算符决议不要求特定的核心库接口。</li>
+</ul>
+
+<h2 id="tostring">ToString</h2>
+<pre data-check="skip"><code class="language-scoop">public interface ToString {
+    public fun toString(): String
+}</code></pre>
+<p><code>print</code>、<code>println</code>、f-string 插值和 <code>StringBuilder.append</code> 都要求 <code>T : ToString</code>，没有对任意类型的字符串化回退。class、object、struct、enum 都必须在声明中显式列出 <code>ToString</code> 并实现它（<code>public override fun toString()</code>）；字段实现了 <code>ToString</code> 不会让宿主自动获得它。tuple 与 <code>Unit</code> 不实现 <code>ToString</code>。泛型类型可以用<a href="classes.html#conditional-conformance">条件接口实现</a>在元素可打印时才实现 <code>ToString</code>。</p>
+<p>需要调试输出任意结构时，可以使用核心库的 <code>ValueInspector</code> 与 <code>DebugPrinter</code>，见<a href="annotations.html#inspection">值观察与调试输出</a>。</p>
+
+<h2 id="hash">Hash</h2>
+<pre data-check="skip"><code class="language-scoop">public interface Hash {
+    public fun hash(): Long
+}</code></pre>
+<p><code>Hash</code> 没有任何默认或自动派生的实现。核心库为 <code>Boolean</code>、<code>Char</code>、八种整数与 <code>String</code> 提供基于内容的实现；浮点数不实现 <code>Hash</code>。作为 <code>HashMap</code> 等哈希容器的键时，类型需要同时实现 <code>Equals&lt;T&gt;</code> 与 <code>Hash</code>，并保证 <code>equals</code> 为真的两个值有相同的哈希值——这是库作者的责任，编译器不做检查。哈希算法的具体数值不保证跨版本稳定。</p>
+
+<h2 id="core-interfaces">core 运算符接口</h2>
+<p>核心库还为每种运算符提供普通的泛型接口，供泛型代码声明所需的运算能力。它们与运算符的可用性无关：一个类型只要有合适的 <code>operator</code> 成员或扩展就能使用运算符，接口只在需要作为上界时才必须显式实现。</p>
+<div class="table-wrap"><table>
+  <tr><th>接口</th><th>方法</th><th>核心库中的实现</th></tr>
+  <tr><td><code>Add&lt;Rhs, Result&gt;</code></td><td><code>plus(other: Rhs): Result</code></td><td>整数、浮点（同类型）与 <code>String</code></td></tr>
+  <tr><td><code>Sub</code> / <code>Mul</code> / <code>Div</code> / <code>Rem&lt;Rhs, Result&gt;</code></td><td><code>minus</code> / <code>times</code> / <code>div</code> / <code>rem</code></td><td>整数与浮点</td></tr>
+  <tr><td><code>UnaryPlus</code> / <code>UnaryMinus&lt;Result&gt;</code></td><td><code>unaryPlus()</code> / <code>unaryMinus()</code></td><td>整数与浮点</td></tr>
+  <tr><td><code>Not&lt;Result&gt;</code></td><td><code>not()</code></td><td><code>Boolean</code></td></tr>
+  <tr><td><code>Increment</code> / <code>Decrement&lt;Result&gt;</code></td><td><code>inc()</code> / <code>dec()</code></td><td>整数与浮点</td></tr>
+  <tr><td><code>Equals&lt;Rhs&gt;</code></td><td><code>equals(other: Rhs): Boolean</code></td><td>基本类型、<code>String</code>、<code>Unit</code>、<code>Ptr&lt;T&gt;</code></td></tr>
+  <tr><td><code>Compare&lt;Rhs&gt;</code></td><td><code>compareTo(other: Rhs): Long</code></td><td>整数、浮点、<code>Char</code>、<code>String</code></td></tr>
+  <tr><td><code>RangeTo</code> / <code>RangeUntil&lt;Rhs, Result&gt;</code></td><td><code>rangeTo</code> / <code>rangeUntil</code></td><td>整数</td></tr>
+  <tr><td><code>Contains&lt;Element&gt;</code></td><td><code>contains(value: Element): Boolean</code></td><td>四种整数区间</td></tr>
+  <tr><td><code>IndexGet&lt;Index, Value&gt;</code> / <code>IndexSet&lt;Index, Value&gt;</code>（及二维的 <code>IndexGet2</code>、<code>IndexSet2</code>）</td><td><code>get</code> / <code>set</code></td><td><code>List</code>、<code>MutableList</code>、<code>MutableArray</code></td></tr>
+  <tr><td><code>Invoke0&lt;R&gt;</code> / <code>Invoke&lt;A, R&gt;</code> / <code>Invoke2&lt;A, B, R&gt;</code></td><td><code>invoke</code></td><td>用户类型</td></tr>
+  <tr><td><code>AddAssign</code> 等 <code>…Assign&lt;Rhs&gt;</code></td><td><code>plusAssign</code> 等</td><td>用户类型</td></tr>
+  <tr><td><code>Component1&lt;R&gt;</code> / <code>Component2&lt;R&gt;</code></td><td><code>component1()</code> / <code>component2()</code></td><td>用户类型</td></tr>
+</table></div>
+<pre><code class="language-scoop">fun &lt;K : Add&lt;K, K&gt;&gt; sum3(a: K, b: K, c: K): K = a + b + c
+
+fun main() {
+    println(sum3(1, 2, 3))         // 6
+    println(sum3("a", "b", "c"))   // abc
+}</code></pre>
+<p>泛型函数体中的运算符在定义处就绑定到上界接口的方法，具体化时调用实际类型的实现；调用方之后导入的扩展不能补救定义处不成立的运算。</p>

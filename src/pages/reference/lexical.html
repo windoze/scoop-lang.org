@@ -1,0 +1,152 @@
+<!-- title: 词法结构; nav: reference; layout: reference; description: Scoop 源文件的词法规则：编码、注释与文档注释、标识符与关键字、整数/浮点/字符/字符串字面量以及 f-string。 -->
+<h1>词法结构</h1>
+<p class="intro">本章说明 Scoop 源码如何被切分为记号：源文件编码、注释、标识符、关键字和各类字面量。语句与表达式的组合规则见<a href="expressions.html">表达式与控制流</a>。</p>
+
+<h2 id="source">源文件</h2>
+<p>Scoop 源文件的扩展名为 <code>.scoop</code>，内容必须是合法的 UTF-8 文本。编译诊断按 UTF-8 字节偏移记录位置，再换算为行列号显示。</p>
+<p>语句通常每行一条，不需要分号；需要在一行内写多条语句时用 <code>;</code> 分隔。表达式在仍然缺少右操作数、或仍处于未闭合的括号内时可以跨行：</p>
+<pre><code class="language-scoop">fun main() {
+    val a = 1; val b = 2
+    val total = a +
+        b
+    val sum = add(
+        a,
+        b
+    )
+    println(total + sum)
+}
+
+fun add(x: Int, y: Int): Int = x + y</code></pre>
+<p>参数、实参和数组元素列表不接受尾随逗号；tuple 字面量与 enum 变体列表可以带尾随逗号，其中单元素 tuple 必须写作 <code>(x,)</code>。</p>
+
+<h3 id="shebang">解释器行</h3>
+<p>文件的前两个字节为 <code>#!</code> 时，第一行被当作普通注释，因此单文件程序可以写成脚本形式。它必须位于文件最开头：前面有空白、BOM 或换行时，<code>#!</code> 不再享有此规则。</p>
+<pre><code class="language-scoop">#!/usr/bin/env -S scoop run
+fun main() {
+    println("run me directly")
+}</code></pre>
+
+<h2 id="comments">注释</h2>
+<ul>
+  <li><code>// …</code> 是行注释，到行尾结束；</li>
+  <li><code>/* … */</code> 是块注释，<strong>不嵌套</strong>：在遇到的第一个 <code>*/</code> 处结束，未终止的块注释是词法错误；</li>
+  <li><code>/** … */</code> 与 <code>/// …</code> 是<a href="annotations.html#doc-comments">文档注释</a>，附着于紧随其后的声明，由 <code>scoop doc</code> 使用；普通编译把它们当作注释；</li>
+  <li><code>/***</code> 开头的块、<code>////</code> 开头的行以及 <code>//!</code> 都是普通注释。单文件程序头部的 <code>//! dep: group:name:version</code> 用来声明额外依赖，见<a href="modules.html#single-file">单文件模式</a>。</li>
+</ul>
+<p>字符串与字符字面量内部不识别注释；f-string 插值 <code>${…}</code> 中的表达式按普通代码处理，可以包含注释。</p>
+
+<h2 id="identifiers">标识符</h2>
+<p>标识符以 Unicode <code>XID_Start</code> 字符或 <code>_</code> 开头，后接任意 <code>XID_Continue</code> 字符，因此可以使用中文等非 ASCII 名称。名称区分大小写，不做 Unicode 规范化。</p>
+<p>用反引号包裹的文本是一个完整的标识符，可以包含空格或与关键字同名。反引号内的文本不能为空，不能含反引号、换行或控制字符，也不处理反斜杠转义。<code>`when`</code> 与普通名称 <code>when</code> 的区别只在于不触发关键字语法；<code>`a.b`</code> 是一个名称，而不是两段路径。</p>
+<pre><code class="language-scoop">fun `check input`(value: Int): Boolean = value &gt;= 0
+
+fun main() {
+    val `when` = 1
+    val 数量 = 3
+    println(`check input`(`when` + 数量))
+}</code></pre>
+<p>测试库常用反引号把测试函数名写成一句话，见<a href="testing.html">测试库</a>。</p>
+
+<h2 id="keywords">关键字</h2>
+<p>以下是<strong>保留关键字</strong>，在任何位置都不能直接用作名称（需要时可用反引号）：</p>
+<pre><code class="language-text">as        break     class     continue  do        else      enum
+false     for       fun       if        import    in        infix
+interface is        package   return    struct    suspend   this
+true      val       var       vararg    when      while</code></pre>
+<p>其他具有特殊含义的单词是<strong>上下文关键字</strong>，只在相应的语法位置起作用，例如：</p>
+<div class="table-wrap"><table>
+  <tr><th>类别</th><th>上下文关键字</th></tr>
+  <tr><td>声明</td><td><code>object</code> <code>companion</code> <code>typealias</code> <code>constructor</code> <code>init</code> <code>annotation</code> <code>release</code> <code>context</code></td></tr>
+  <tr><td>修饰符</td><td><code>public</code> <code>internal</code> <code>protected</code> <code>private</code> <code>open</code> <code>final</code> <code>abstract</code> <code>sealed</code> <code>override</code> <code>operator</code> <code>const</code> <code>inner</code> 以及仅为兼容而接受的 <code>inline</code> <code>noinline</code> <code>crossinline</code> <code>reified</code> <code>tailrec</code></td></tr>
+  <tr><td>表达式与语句</td><td><code>try</code> <code>catch</code> <code>finally</code> <code>throw</code> <code>super</code> <code>case</code> <code>it</code></td></tr>
+  <tr><td>属性与约束</td><td><code>get</code> <code>set</code> <code>field</code> <code>by</code> <code>where</code> <code>value</code> <code>ref</code> <code>requires</code></td></tr>
+</table></div>
+<p>上下文关键字在其他位置可以作为普通名称（例如名为 <code>value</code> 的参数很常见），但在可能产生歧义的表达式位置会被优先解析为关键字语法。Scoop 没有 <code>null</code> 字面量，也没有预定义的 <code>Self</code> 类型；这两个单词只是普通名称。</p>
+
+<h2 id="integers">整数字面量</h2>
+<p>整数字面量可以写成十进制、<code>0x</code>/<code>0X</code> 十六进制或 <code>0b</code>/<code>0B</code> 二进制，不支持八进制。下划线可以出现在两个数字之间作为分隔，不能位于首尾或紧邻前缀、后缀。</p>
+<div class="table-wrap"><table>
+  <tr><th>写法</th><th>类型</th></tr>
+  <tr><td><code>42</code>、<code>0xFF</code>、<code>1_000_000</code></td><td>无后缀：按上下文期望的有符号整数类型；没有约束时依次取 <code>Int</code>、<code>Long</code> 中第一个能表示该值的类型</td></tr>
+  <tr><td><code>42u</code>、<code>0xFFu</code></td><td><code>u</code>/<code>U</code>：按上下文期望的无符号整数类型；没有约束时依次取 <code>UInt</code>、<code>ULong</code></td></tr>
+  <tr><td><code>42L</code></td><td><code>l</code>/<code>L</code>：固定为 <code>Long</code></td></tr>
+  <tr><td><code>42uL</code>、<code>42UL</code></td><td><code>uL</code>（大小写组合均可）：固定为 <code>ULong</code></td></tr>
+</table></div>
+<pre><code class="language-scoop">fun main() {
+    val a = 42                // Int
+    val b = 3_000_000_000     // 超出 Int，推断为 Long
+    val c: UInt8 = 255u       // 由期望类型确定为 UInt8
+    val d: Int8 = -128        // 负号直接作用于字面量，Int8 的最小值可以表示
+    val e = 0b1010_1010uL     // ULong
+    println(f"${a} ${b} ${c} ${d} ${e}")
+}</code></pre>
+<p>字面量的值必须能被最终选定的类型表示，否则是编译错误；无后缀字面量不能适配无符号类型，带 <code>u</code> 的字面量也不能适配有符号类型。十六进制与二进制表示的是非负数学值，不按位模式重新解释：<code>0xFFFFFFFF</code> 不能赋给 <code>Int</code>。字面量的绝对值不能超过 2<sup>64</sup>−1。</p>
+<pre data-check="error"><code class="language-scoop">fun main() {
+    val x: Int8 = 128         // 编译错误：128 不能表示为 Int8
+    val y: Int = 5u           // 编译错误：无符号字面量不能用于 Int
+}</code></pre>
+
+<h2 id="floats">浮点字面量</h2>
+<p>浮点字面量必须带有小数部分、指数部分或 <code>f</code>/<code>F</code> 后缀中的至少一项，例如 <code>1.0</code>、<code>.5</code>、<code>1e3</code>、<code>1.5e-2</code>、<code>2f</code>。小数点后必须有数字，因此 <code>1.</code> 不是浮点字面量，<code>1..2</code> 是区间、<code>1.toDouble()</code> 是方法调用。没有十六进制浮点写法，也没有 <code>d</code>/<code>D</code> 后缀。</p>
+<ul>
+  <li>带 <code>f</code>/<code>F</code> 后缀的字面量类型为 <code>Float</code>；</li>
+  <li>无后缀的字面量按上下文期望的 <code>Float</code> 或 <code>Double</code> 直接舍入（最近偶数），没有约束时为 <code>Double</code>；</li>
+  <li>舍入结果为无穷大的有限字面量是编译错误；下溢到次正规数或零是合法的；</li>
+  <li>负号是一元运算，<code>-0.0</code> 保留负零。整数字面量不会因为期望类型是浮点而变成浮点数，<code>val x: Double = 1</code> 是编译错误。</li>
+</ul>
+<pre><code class="language-scoop">fun main() {
+    val ratio = 0.75          // Double
+    val scale: Float = 0.1    // 按 Float 精度直接舍入
+    val small = 1.5e-2F       // Float
+    println(f"${ratio} ${scale} ${small}")
+}</code></pre>
+
+<h2 id="booleans">布尔与 Unit</h2>
+<p><code>true</code> 与 <code>false</code> 是 <code>Boolean</code> 类型的两个值。<code>()</code> 是 <code>Unit</code> 类型唯一的值，也可以写作 <code>Unit</code>，见 <a href="values.html#tuples">tuple</a>。</p>
+
+<h2 id="chars">字符字面量</h2>
+<p>字符字面量写在单引号中，转义之后必须恰好是一个 Unicode 标量值，类型为 <code>Char</code>：<code>'A'</code>、<code>'雪'</code>、<code>'😀'</code>、<code>'\u{1F600}'</code>。空字符、多个标量或包含物理换行都是编译错误。字符字面量使用与字符串相同的转义序列。</p>
+
+<h2 id="strings">字符串字面量</h2>
+<p>普通字符串写在双引号中，类型为 <code>String</code>，支持以下转义：</p>
+<div class="table-wrap"><table>
+  <tr><th>转义</th><th>含义</th></tr>
+  <tr><td><code>\t</code> <code>\b</code> <code>\n</code> <code>\r</code></td><td>制表符、退格、换行、回车</td></tr>
+  <tr><td><code>\'</code> <code>\"</code> <code>\\</code> <code>\$</code></td><td>单引号、双引号、反斜杠、美元符号</td></tr>
+  <tr><td><code>\uXXXX</code></td><td>恰好四位十六进制的 Unicode 标量</td></tr>
+  <tr><td><code>\u{X…}</code></td><td>一至六位十六进制的 Unicode 标量</td></tr>
+</table></div>
+<p>每个 Unicode 转义都必须是合法标量值：代理项（U+D800–U+DFFF）、超过 U+10FFFF 的值、缺少数字和未知转义都是编译错误。字符串可以包含 U+0000。</p>
+<p>三引号 <code>"""…"""</code> 是 raw 字符串：内容原样保留，包括换行，不处理任何反斜杠转义。</p>
+<pre><code class="language-scoop">fun main() {
+    println("tab:\tquote:\" dollar:$ snow:\u{2744}")
+    println("""C:\path\no-escape
+second line""")
+}</code></pre>
+
+<h3 id="fstrings">f-string 插值</h3>
+<p>只有以 <code>f</code> 为前缀的字符串支持插值：单行 <code>f"…"</code> 与多行 raw 形式 <code>f"""…"""</code>。插值段写作 <code>${表达式}</code>，花括号不能省略；<code>$name</code> 是编译错误，编译器会提示改为 <code>${name}</code>。其他位置的 <code>$</code> 是普通字符，单行 f-string 中也可以写 <code>\$</code>。普通字符串中的 <code>$</code> 永远不会触发插值。</p>
+<pre><code class="language-scoop">fun main() {
+    val n = 42
+    val price = 9
+    println(f"the number is ${n}, next is ${n + 1}")
+    println(f"cost: \$${price}")
+    println(f"""multi-line
+value = ${n * 2}""")
+}</code></pre>
+<p>插值的语义：</p>
+<ul>
+  <li>每个插值表达式的类型必须实现 <code>ToString</code>；不存在对任意类型的字符串化回退，自定义类型需要显式实现 <a href="operators.html#tostring"><code>ToString</code></a>。</li>
+  <li>各段按源码顺序交替求值与转换：前一段的 <code>toString()</code> 完成后才开始求值下一段。任一段抛出异常时，后续段不再求值。</li>
+  <li>插值中可以调用挂起函数，前提是所在上下文本身允许挂起。</li>
+  <li>结果等价于用 <code>StringBuilder</code> 依次追加文本与各段结果。插值使用核心库中真实的 <code>ToString</code> 与 <code>StringBuilder</code>，用户同名声明不会改变插值的含义。</li>
+  <li>f-string 不是常量表达式，即使只有文本段也不能用于 <code>const val</code>。</li>
+</ul>
+
+<h2 id="other-literals">其他字面量</h2>
+<ul>
+  <li>数组字面量 <code>[1, 2, 3]</code> 构造 <code>Array</code> 或 <code>MutableArray</code>，见<a href="types.html#arrays">数组</a>；</li>
+  <li>tuple 字面量 <code>(1, "one")</code>、单元素 tuple <code>(x,)</code>，见 <a href="values.html#tuples">tuple</a>；</li>
+  <li>没有 <code>null</code>，“无值”用 <code>Option</code> 的 <code>None</code> 表示，见 <a href="option.html">Option 与空安全</a>；</li>
+  <li>没有 <code>S { field: value }</code> 形式的 struct 字面量，struct 一律通过构造函数创建。</li>
+</ul>

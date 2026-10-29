@@ -1,0 +1,52 @@
+<!-- title: 参考文档; nav: reference; layout: reference; description: Scoop 参考文档：完整的语言参考（词法、类型、值类型、表达式、模式、函数、类、泛型、协程、模块、注解与 FFI）以及核心库和标准库参考。 -->
+<h1>参考文档</h1>
+<p class="intro">本参考完整描述 Scoop 语言的语法与语义，以及随工具链发布的核心库和标准库。它按主题组织，适合查阅某条规则的准确含义；想先快速上手，请阅读<a href="../docs/tour.html">语言导览</a>和<a href="../guides/index.html">用户指南</a>。</p>
+
+<h2 id="structure">文档结构</h2>
+<p>参考文档分为两部分。<strong>语言参考</strong>说明源码如何书写、类型如何检查、程序如何求值；<strong>标准库</strong>说明默认可用的核心库 <code>scoop.core</code>、各个库 Cone 的用途和测试库。每个类型与函数的完整签名请查阅由 <code>scoop doc</code> 生成的 <a href="../api/index.html">API 文档</a>。</p>
+<div class="table-wrap"><table>
+  <tr><th>章节</th><th>内容</th></tr>
+  <tr><td><a href="lexical.html">词法结构</a></td><td>源文件编码、注释与文档注释、标识符、关键字、数值/字符/字符串字面量、f-string</td></tr>
+  <tr><td><a href="types.html">类型系统</a></td><td>值类型与引用类型、<code>Any</code>/<code>Nothing</code>、基本类型与数值语义、<code>Char</code>、<code>String</code>、数组、函数类型、<code>typealias</code>、类型检查与转换、smart cast</td></tr>
+  <tr><td><a href="values.html">struct、enum 与 tuple</a></td><td>值类型的声明与构造、整型枚举、副本更新、解构、结构相等、装箱</td></tr>
+  <tr><td><a href="option.html">Option 与空安全</a></td><td><code>T?</code> 的含义、<code>?.</code>/<code>?:</code>/<code>!!</code>/<code>as?</code>、嵌套 Option</td></tr>
+  <tr><td><a href="expressions.html">表达式与控制流</a></td><td>运算符优先级、<code>if</code>/<code>when</code>/<code>try</code> 表达式、循环、标签与跳转、区间、求值顺序</td></tr>
+  <tr><td><a href="patterns.html">when 与模式匹配</a></td><td><code>when</code> 的三种形式、<code>case</code> 模式、guard、穷尽性检查</td></tr>
+  <tr><td><a href="functions.html">函数与闭包</a></td><td>函数声明、默认/命名参数与 <code>vararg</code>、扩展函数、lambda、捕获规则、函数引用、重载决议、task-local Context</td></tr>
+  <tr><td><a href="classes.html">类、接口与对象</a></td><td>构造与初始化顺序、属性、继承与覆写、接口默认实现、<code>object</code>/companion、嵌套与局部类型、sealed、委托、可见性、条件接口实现、<code>release</code> 块</td></tr>
+  <tr><td><a href="generics.html">泛型</a></td><td>单态化、不变性、上界与 <code>where</code>、<code>value</code>/<code>ref</code>、负向约束、companion 约束、成员要求</td></tr>
+  <tr><td><a href="operators.html">运算符与相等</a></td><td><code>operator</code> 约定、复合赋值、<code>infix</code>、<code>==</code> 与 <code>Equals</code>、<code>ToString</code>、<code>Hash</code>、core 运算符接口</td></tr>
+  <tr><td><a href="exceptions.html">异常与资源</a></td><td><code>Throwable</code> 层级、<code>try</code>/<code>catch</code>/<code>finally</code>、栈快照、未捕获异常与退出码、<code>use</code></td></tr>
+  <tr><td><a href="concurrency.html">协程与并发</a></td><td><code>suspend</code>、协程原语、结构化并发与取消、线程与数据竞争、原子类型</td></tr>
+  <tr><td><a href="modules.html">Cone、package 与 import</a></td><td><code>Cone.toml</code>、源码选择、package 与 import、re-export、名称查找、程序入口、单文件模式</td></tr>
+  <tr><td><a href="annotations.html">注解与编译期能力</a></td><td>自定义注解、类型使用注解、文档注释、静态类型描述、编解码合成、源码位置、编译期输入</td></tr>
+  <tr><td><a href="ffi.html">原生互操作</a></td><td><code>@Extern</code>、<code>@Unsafe</code>、<code>@NoGC</code>、<code>@GCLeaf</code>、<code>Ptr</code>/<code>FunPtr</code>、C 布局、errno、native 源码与 Scoop ABI</td></tr>
+  <tr><td><a href="core.html">核心库 scoop.core</a></td><td>默认导入的类型与函数：字符串、数组与列表、迭代、输出、资源、协程、原子类型等</td></tr>
+  <tr><td><a href="stdlib.html">库 Cone 一览</a></td><td>随工具链发布的库 Cone：集合与文本、平台与异步 I/O、HTTP、TLS、JSON、正则、命令行与终端</td></tr>
+  <tr><td><a href="testing.html">测试库 scoop.test</a></td><td>测试声明、断言、生命周期与 <code>scoop test</code></td></tr>
+</table></div>
+
+<h2 id="conventions">阅读约定</h2>
+<ul>
+  <li><strong>代码示例</strong>：本参考中的 Scoop 代码块都用配套工具链做过类型检查。标为“编译错误”的代码用来说明被拒绝的写法，注释指出出错的位置；需要 <code>Cone.toml</code>、多个文件或 native 库的片段只作说明。</li>
+  <li><strong>编译错误与运行期异常</strong>：“是编译错误”表示编译器拒绝该程序；“抛出 <code>X</code>”表示程序能编译，运行到该处时抛出异常 <code>X</code>。Scoop 不把可以静态判定的错误推迟到运行期。</li>
+  <li><strong>值类型与引用类型</strong>：值类型（struct、enum、tuple 及基本类型）没有 identity，复制时复制完整值；引用类型（class、interface、object、函数、数组、<code>String</code> 等）的值是指向堆对象的引用。很多规则依此区分，见<a href="types.html#kinds">类型系统</a>。</li>
+  <li><strong>Cone</strong>：Scoop 的模块、依赖与编译单位，相当于其他语言的 crate 或 module；<code>internal</code> 可见性即“同一 Cone 内可见”。见 <a href="modules.html">Cone、package 与 import</a>。</li>
+  <li><strong>命令名</strong>：本参考中的 <code>scoop …</code> 命令在 Windows 上写作 <code>sco …</code>，见<a href="../docs/install.html">快速开始</a>。</li>
+  <li><strong>未提及即不支持</strong>：Scoop 以 Kotlin 核心语法为基础。本参考没有描述的 Kotlin 特性（例如 <code>data class</code>、<code>lateinit</code>、型变修饰符、运行期反射）在 Scoop 中不存在；差异汇总见<a href="../docs/kotlin.html">对比 Kotlin</a>。</li>
+</ul>
+
+<h2 id="program">程序的组成</h2>
+<p>一个 Scoop 程序由一个可执行 Cone 和它依赖的库 Cone 组成。最简单的程序是一个 <code>.scoop</code> 文件，<code>scoop run</code> 会把它当作只含这一个文件的可执行 Cone，并默认依赖核心库与标准库：</p>
+<pre><code class="language-scoop">fun main() {
+    val language = "Scoop"
+    println(f"Hello, ${language}!")
+}</code></pre>
+<pre><code class="language-sh">$ scoop run --release hello.scoop
+Hello, Scoop!</code></pre>
+<p>源文件由可选的 <code>package</code> 声明、若干 <code>import</code> 和顶层声明组成。顶层声明包括函数、属性、类型（<code>class</code>、<code>interface</code>、<code>object</code>、<code>struct</code>、<code>enum</code>）、<code>typealias</code> 与注解类。程序从唯一的 <code>main</code> 函数开始执行；进入 <code>main</code> 之前，所有需要运行期初始化的顶层属性已经按确定的顺序初始化完毕。入口签名、退出码与命令行参数见<a href="modules.html#entry">程序入口</a>。</p>
+<p>多文件项目使用带 <code>Cone.toml</code> 的 Cone 目录，用 <code>scoop new</code> 创建，详见<a href="modules.html#manifest">Cone 清单</a>与<a href="../guides/index.html">用户指南</a>。</p>
+
+<h2 id="sources">规范与版本</h2>
+<p>本参考依据 Scoop 仓库 <a href="https://github.com/windoze/scoop/tree/main/docs/specs"><code>docs/specs/</code></a> 中的语言、运行时与库规范，并以工具链 <code>scoop 0.0.0-dev</code>（revision <code>ae13036d9</code>）的实际行为校对；Windows 目标相关的内容依据 revision <code>b0de03700</code> 的规范与 Windows 实施记录。规范面向实现者，包含 ABI、产物格式与编译器内部契约等细节；本参考面向使用者，省略这些内容并保留会影响程序含义的规则。二者不一致时以规范为准，并欢迎在 <a href="https://github.com/windoze/scoop">GitHub</a> 上报告。</p>
+<p>Scoop 尚未发布正式版本，语言与库仍可能调整。当前支持的目标为 macOS（<code>aarch64-apple-darwin</code>）、Linux（<code>x86_64-unknown-linux-gnu</code>、<code>x86_64-unknown-linux-musl</code>）与 Windows x64（<code>x86_64-pc-windows-msvc-ucrt</code>、<code>x86_64-w64-windows-llvm-mingw-ucrt</code>、<code>x86_64-w64-windows-llvm-mingw-msvcrt</code>），各目标的区别见<a href="modules.html#targets">构建目标</a>，安装方式见<a href="../docs/install.html">快速开始</a>。</p>

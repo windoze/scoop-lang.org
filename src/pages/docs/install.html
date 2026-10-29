@@ -9,8 +9,13 @@
   <tr><th>平台</th><th>目标</th><th>说明</th></tr>
   <tr><td>macOS</td><td><code>aarch64-apple-darwin</code></td><td>Apple Silicon，当前发行基线 macOS 27.0.1；需 Xcode 或 Command Line Tools、Apple Clang、macOS SDK 与系统 linker</td></tr>
   <tr><td>Linux</td><td><code>x86_64-unknown-linux-gnu</code> / <code>x86_64-unknown-linux-musl</code></td><td>GNU 宿主包提供两套目标资源；当前基线 glibc 2.43 / musl 1.2.5。需 GCC、GNU ld 与开发文件，构建 musl 程序另需 musl-gcc 和匹配的开发文件</td></tr>
+  <tr><td>Windows</td><td><code>x86_64-pc-windows-msvc-ucrt</code>（默认）<br><code>x86_64-w64-windows-llvm-mingw-ucrt</code><br><code>x86_64-w64-windows-llvm-mingw-msvcrt</code></td><td>Windows 10 x64 及以上，当前发行基线 build 10.0.26300。工具包自带 Clang、LLD、资源编译器和两套 LLVM-MinGW 开发资源，MinGW 目标开箱即用；默认的 MSVC UCRT 目标另需本机 C++ Build Tools 与 Windows SDK（不需要完整的 Visual Studio IDE）</td></tr>
 </table></div>
 <p>版本基线以随包说明及<a href="https://github.com/windoze/scoop/blob/main/scripts/release.toml">发行配置</a>为准；GNU 宿主命令不保证在纯 musl 系统运行。使用 <code>scoop.asyncio</code> 的 Linux 程序还要求内核 6.1 及实际可用的 io_uring 能力；这一要求不适用于所有 Scoop 程序。</p>
+<div class="callout">
+  <strong>Windows 上的命令名是 <code>sco</code></strong>
+  <p>为避免与同名的 Scoop 包管理器冲突，Windows 工具包的主驱动安装为 <code>sco.exe</code>，不提供 <code>scoop.exe</code> 别名。本站所有 <code>scoop …</code> 命令在 Windows 上写作 <code>sco …</code>，例如 <code>sco run hello.scoop</code>、<code>sco pm resolve</code>、<code>sco example --list</code>。其他程序名不变（<code>scoopc.exe</code>、<code>scoop-pm.exe</code>、<code>scoop-lsp.exe</code> 等），环境变量仍是 <code>SCOOP_*</code>。</p>
+</div>
 
 <ol class="steps">
   <li><strong>解压工具包</strong>
@@ -21,9 +26,13 @@ $ tar -xJf scoop-&lt;version&gt;-aarch64-apple-darwin.tar.xz -C ~/.scoop</code><
   <li><strong>加入 PATH</strong>
 <pre><code class="language-sh"># ~/.zshrc 或 ~/.bashrc
 export PATH="$HOME/.scoop/bin:$PATH"</code></pre>
+    <p>Windows 上在 PowerShell 中解压同名的 <code>.tar.xz</code> 归档，并把 <code>%USERPROFILE%\.scoop\bin</code> 加入用户 PATH：</p>
+<pre><code class="language-sh">PS&gt; New-Item -ItemType Directory -Force $HOME\.scoop
+PS&gt; tar -xJf scoop-&lt;version&gt;-x86_64-pc-windows-gnullvm.tar.xz -C $HOME\.scoop
+PS&gt; [Environment]::SetEnvironmentVariable("Path", "$HOME\.scoop\bin;" + [Environment]::GetEnvironmentVariable("Path", "User"), "User")</code></pre>
   </li>
   <li><strong>确认安装</strong>
-<pre><code class="language-sh">$ scoop --version
+<pre><code class="language-sh">$ scoop --version          # Windows：sco --version
 scoop &lt;version&gt; (&lt;revision&gt;)</code></pre>
     <p><code>scoop</code> 会自动把自身所在的安装根作为 sysroot；如需使用其他位置，可设置 <code>SCOOP_SYSROOT</code> 或传入 <code>--sysroot</code>。</p>
   </li>
@@ -32,14 +41,14 @@ scoop &lt;version&gt; (&lt;revision&gt;)</code></pre>
 <p>安装根的目录结构：</p>
 <pre><code>~/.scoop/
   VERSION
-  toolchain.toml        工具包内容与目标信息
-  bin/                  scoop、scoopc、scoop-link、scoop-lsp、scoop-pm、lldb、lldb-dap
+  bin/                  scoop（Windows 为 sco.exe）、scoopc、scoop-link、scoop-lsp、scoop-pm、
+                        scoop-lldb、scoop-lldb-dap 及其他 scoop- 前缀的 LLVM 工具
   commands/             scoop-example 等外部子命令
   lib/&lt;target-triple&gt;/  预编译 .slib、原生静态库、运行时
   libexec/lldb/         调试器配套 Python 与平台 helper
   include/              公开的 Scoop C 头文件
   src/                  全部内置 Cone 的源码与示例
-  share/scoop/examples/ 离线示例索引与正文
+  share/scoop/          toolchain.toml（工具包内容与目标信息）、离线示例索引与正文
   docs/                 标准库 API 文档，按目标区分
   tooling/              VS Code 扩展与 Scoop 编程 skill</code></pre>
 
@@ -142,7 +151,7 @@ $ scoop pm deps
 $ scoop build --release --locked
 $ scoop pm update</code></pre>
 <p>Git/registry 源码默认缓存在 <code>~/.scoop/packages/</code>。多 Cone 项目可以使用 <code>[workspace]</code>，通过 <code>-p group:name</code> 选择成员，或用 <code>scoop build --workspace</code> / <code>scoop test --workspace</code> 处理全部成员；<code>run</code> 必须选中唯一可执行 Cone。规则见<a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-PACKAGE-SPEC.md">包管理规范</a>。维护 registry 的步骤见<a href="../guides/registry.html">发布指南</a>；目前已交付消费端，打包与索引维护命令仍属后续计划。</p>
-<p>Cone 还可以携带 C/C++ 源码与原生系统库，用于编写 FFI 绑定，详见<a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-SPEC.md">语言规范</a> 12.2 节。</p>
+<p>Cone 还可以携带 C/C++ 源码与原生系统库，用于编写 FFI 绑定，详见参考文档的<a href="../reference/ffi.html#native-sources">原生互操作</a>一章。</p>
 
 <h2 id="commands">命令速查</h2>
 <div class="table-wrap"><table>
@@ -169,15 +178,15 @@ $ scoop pm update</code></pre>
 <p>编辑器消费已有的锁定依赖，不自动更新版本或下载源码。缺少 lock 或依赖时，在项目目录运行 <code>scoop pm resolve</code> 或 <code>scoop pm fetch</code>，再继续分析。</p>
 
 <h3 id="debugging">源码调试</h3>
-<p>工具包附带 <code>lldb</code> 与 <code>lldb-dap</code>。在 VS Code 中按 F5 选择 Scoop，或运行 <code>Scoop: Debug Current File</code>，可自动构建并启动调试；也支持调试测试和附加现有进程。</p>
+<p>工具包附带 <code>scoop-lldb</code> 与 <code>scoop-lldb-dap</code>（带 <code>scoop-</code> 前缀，可与其他 LLVM 安装共存于 PATH）。在 VS Code 中按 F5 选择 Scoop，或运行 <code>Scoop: Debug Current File</code>，可自动构建并启动调试；也支持调试测试和附加现有进程。</p>
 <pre><code class="language-sh">$ scoop build --release --debug-info full</code></pre>
-<p>调试文件随程序输出：macOS 使用 <code>.dSYM</code>，Linux 使用 <code>.debug</code>。debug 构建默认包含完整调试信息，release 默认不包含；异常与 trap 可以显示物理栈及源码位置。当前不提供完整 Scoop 表达式求值或协程逻辑栈，配置方法见<a href="https://github.com/windoze/scoop/blob/main/tooling/vscode-scoop/README.md#原生调试">调试说明</a>。</p>
+<p>调试文件随程序输出：macOS 使用 <code>.dSYM</code>，Linux 使用 <code>.debug</code>，Windows 使用相邻的 <code>.pdb</code>。debug 构建默认包含完整调试信息，release 默认不包含；异常与 trap 可以显示物理栈及源码位置。当前不提供完整 Scoop 表达式求值或协程逻辑栈，配置方法见<a href="https://github.com/windoze/scoop/blob/main/tooling/vscode-scoop/README.md#原生调试">调试说明</a>。</p>
 
 <h2 id="next">下一步</h2>
 <ul>
   <li><a href="../guides/language-basics.html">语言基础</a>：从单文件开始完成文本统计程序；</li>
   <li><a href="tour.html">语言导览</a>：系统了解 Scoop 的语法和类型系统；</li>
   <li><a href="kotlin.html">对比 Kotlin</a>：如果你熟悉 Kotlin，这里列出了所有需要注意的差异；</li>
-  <li><a href="stdlib.html">标准库</a>：浏览随工具链发布的库和示例；</li>
+  <li><a href="../reference/index.html">参考文档</a>：查阅完整的语言参考、核心库与随工具链发布的<a href="../reference/stdlib.html">库 Cone</a>；</li>
   <li><code>scoop example --list</code> 列出离线主题；库示例位于 <code>~/.scoop/src/&lt;cone&gt;/examples</code>。</li>
 </ul>

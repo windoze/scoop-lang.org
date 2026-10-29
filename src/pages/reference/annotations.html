@@ -1,0 +1,209 @@
+<!-- title: 注解与编译期能力; nav: reference; layout: reference; description: Scoop 的注解与编译期功能：自定义注解、Target 与 Repeatable、use-site 目标、类型使用注解、文档注释、静态类型描述 typeInfo、编解码合成与 Serialize、源码位置、includeStr/includeBytes/includeDir/env 以及值观察与调试输出。 -->
+<h1>注解与编译期能力</h1>
+<p class="intro">Scoop 的注解是纯编译期的数据：没有运行期注解对象，也没有运行期反射。编译器根据注解与类型的静态描述完成编解码、调试视图等方法的合成，并提供读取源码位置、嵌入文件与读取构建环境的编译期函数。核心注解（<code>@Extern</code>、<code>@NoGC</code>、<code>@Unsafe</code> 等）见<a href="ffi.html">原生互操作</a>。</p>
+
+<h2 id="custom-annotations">自定义注解</h2>
+<pre><code class="language-scoop">public annotation class Description(val text: String)
+
+@Target([AnnotationTarget.Function])
+annotation class Experimental
+
+@Repeatable
+annotation class Tag(val name: String)
+
+@Description("Account data")
+public struct Account(@Description("Stable identifier") val id: Long, val owner: String)
+
+@Experimental
+@Tag("io") @Tag("beta")
+fun download() {}
+
+fun main() {
+    download()
+}</code></pre>
+<ul>
+  <li><code>annotation class</code> 不能实例化，没有继承、泛型参数、body 或成员函数；参数都是 <code>val</code>，可以有默认值。无参数的注解使用时可以省略括号。</li>
+  <li>参数类型限于 <code>Boolean</code>、<code>String</code>、<code>Char</code>、整数、浮点、<a href="values.html#integer-enums">整型枚举</a>、另一个注解类，以及这些类型的一维 <code>Array</code>。</li>
+  <li>参数值必须是字面量（可带符号）、同类型的 <code>const val</code>、数组字面量 <code>[…]</code> 或嵌套注解 <code>Message("text")</code>；不能调用函数或构造普通对象。</li>
+  <li>注解可以标在类型、注解类、enum 变体、字段、属性、函数、构造函数、参数、访问器、接收者和类型别名上。</li>
+  <li><code>@Target([AnnotationTarget.…])</code> 限定注解可用的位置，未标注时允许全部位置。<code>AnnotationTarget</code> 的取值有 <code>Class</code>、<code>AnnotationClass</code>、<code>EnumVariant</code>、<code>Field</code>、<code>Property</code>、<code>Function</code>、<code>Constructor</code>、<code>ValueParameter</code>、<code>PropertyGetter</code>、<code>PropertySetter</code>、<code>TypeAlias</code>、<code>Type</code>。</li>
+  <li>同一目标重复使用同一注解需要该注解标注 <code>@Repeatable</code>，否则是编译错误；重复的应用保留源码顺序。</li>
+  <li>注解不会从宿主复制到字段、派生类或访问器，也不会被继承。</li>
+</ul>
+
+<h3 id="use-site">use-site 目标</h3>
+<p>一个声明对应多个实体时，用 <code>@target:Name(…)</code> 指定注解属于哪一个：<code>property</code>（逻辑属性）、<code>field</code>（backing field 或值类型字段）、<code>get</code>/<code>set</code>（访问器）、<code>param</code>（构造参数）、<code>setparam</code>（setter 的参数）、<code>receiver</code>（扩展接收者）、<code>delegate</code>（委托存储）。主构造函数中带 <code>val</code>/<code>var</code> 的参数上，未指定目标的注解属于字段/属性；只允许参数目标的注解需要显式写 <code>@param:</code>。</p>
+
+<h3 id="type-annotations">类型使用注解</h3>
+<p>目标为 <code>AnnotationTarget.Type</code> 的注解可以写在类型的使用位置，包括字段、参数、结果、局部变量的显式类型、类型实参与函数类型的各部分。前缀作用于紧随其后的完整类型：<code>@A T?</code> 标注 Option 本身，<code>(@A T)?</code> 标注元素 <code>T</code>。类型注解不影响类型身份、子类型、重载或布局，只进入静态类型描述。</p>
+
+<h2 id="doc-comments">文档注释</h2>
+<p><code>/** … */</code> 与 <code>/// …</code> 附着于紧随其后的声明，正文使用 Markdown，第一段是摘要。<code>scoop doc</code> 据此生成离线 API 文档站点。</p>
+<pre><code class="language-scoop">/**
+ * Parses a port number from [text].
+ *
+ * @param text decimal digits without sign
+ * @return the port, or `None` when [text] is not a valid port
+ * @see Address
+ */
+public fun parsePort(text: String): Int? = None
+
+/// A network address.
+public struct Address(
+    /// Host name or literal IP address.
+    val host: String,
+    val port: Int
+)
+
+fun main() {}</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>标签</th><th>含义</th></tr>
+  <tr><td><code>@param name</code></td><td>值参数或类型参数</td></tr>
+  <tr><td><code>@property name</code></td><td>当前类型的字段或属性</td></tr>
+  <tr><td><code>@constructor</code></td><td>主构造函数</td></tr>
+  <tr><td><code>@receiver</code></td><td>扩展的接收者</td></tr>
+  <tr><td><code>@return</code></td><td>结果</td></tr>
+  <tr><td><code>@throws Type</code></td><td>可能抛出的异常（只是说明，不是受检异常）</td></tr>
+  <tr><td><code>@see target</code></td><td>符号或 URL</td></tr>
+  <tr><td><code>@since text</code></td><td>版本说明</td></tr>
+</table></div>
+<p>正文中的 <code>[Type]</code>、<code>[Type.member]</code> 与 <code>[label][Type]</code> 链接到符号，在声明处的作用域中解析。核心库注解 <code>@DocHidden</code> 从生成的文档中隐藏声明，<code>@DocAlias("name")</code> 为声明增加搜索关键词；它们不改变可见性或语义。普通编译不检查文档内容。</p>
+
+<h2 id="type-info">静态类型描述</h2>
+<p><code>typeInfo&lt;T&gt;()</code> 返回编译器为类型 <code>T</code> 生成的描述：字段、变体、属性、构造参数、可见性与注解。描述是普通的不可变值，按需惰性展开；泛型函数中的 <code>T</code> 在单态化时替换为具体类型，不需要 <code>reified</code>。</p>
+<pre><code class="language-scoop">struct Point(val x: Int, val y: Int)
+
+fun main() {
+    val info = typeInfo&lt;Point&gt;()
+    println(info.type.displayName)                     // Point
+    when (val shape = info.describe().shape) {
+        case TypeShape.Struct(details) -&gt; {
+            for (field in details.fields) {
+                when (field.name) {
+                    case MemberName.Named(name) -&gt; println(name)
+                    case MemberName.Positional(index) -&gt; println(index)
+                }
+            }
+        }
+        case _ -&gt; println("not a struct")
+    }
+}</code></pre>
+<ul>
+  <li><code>TypeShape</code> 区分 <code>Struct</code>、<code>Enum</code>、<code>IntegerEnum</code>、<code>Class</code>、<code>Object</code>、<code>Interface</code>、<code>Tuple</code>、<code>Unit</code>、<code>Intrinsic</code>、<code>Function</code>、<code>Pointer</code>。</li>
+  <li><code>TypeRef</code> 按完整类型身份比较；透明别名与展开后的类型相同。</li>
+  <li><code>annotationKey&lt;A&gt;()</code> 取得注解声明的键，配合 <code>findAnnotations</code> 在描述中筛选注解。</li>
+  <li>描述不提供按名称取类型、反射构造或调用，取得私有成员的描述也不会使其值可以访问。<code>scoop.cli</code> 等库用它从数据类型生成命令行 schema。</li>
+</ul>
+
+<h2 id="codecs">编解码</h2>
+<p>核心库定义了与数据格式无关的编解码协议：</p>
+<pre data-check="skip"><code class="language-scoop">public interface ValueEncoder&lt;T&gt; {
+    public fun encode(value: T, encoder: Encoder): Unit
+}
+
+public interface ValueDecoder&lt;T&gt; {
+    public fun decode(decoder: Decoder): T
+}</code></pre>
+<p>编解码器（codec）通常是数据类型的 companion。在 companion 上<strong>声明</strong>实现这两个接口而不写方法体时，编译器为 struct、enum、tuple 以及没有显式基类的普通 final class 合成实现；同一套实现可供 JSON、命令行参数、HTTP 查询参数等不同格式复用：</p>
+<pre><code class="language-scoop">//! dep: scoop:scoop.json:0.1.0
+
+import scoop.json.*
+
+public struct User(
+    val name: String,
+    @Serialize(rename = "e-mail") val email: String?,
+    @Serialize(ignore = true) val cache: Int = 0,
+    val tags: Array&lt;String&gt; = []
+) {
+    public companion object : ValueEncoder&lt;User&gt;, ValueDecoder&lt;User&gt;
+}
+
+fun main() {
+    val text = Json.encodeToString(User("Ada", Some("ada@example.com"), 5, ["admin"]))
+    println(text)       // {"name":"Ada","e-mail":"ada@example.com","tags":["admin"]}
+    val user = Json.decodeFromString&lt;User&gt;("{\"name\":\"Lin\",\"e-mail\":null}")
+    println(f"${user.name} ${user.cache} ${user.tags.size}")      // Lin 0 0
+}</code></pre>
+<ul>
+  <li>数据实例本身<strong>不会</strong>因此实现任何接口；codec 是独立的值，泛型代码通过显式参数（<code>codec: ValueEncoder&lt;T&gt;</code>）或 <a href="generics.html#companion-constraints"><code>where T.Companion : ValueEncoder&lt;T&gt;</code></a> 取得它。<code>Json.encodeToString(value, User.Companion)</code> 显式传入 codec，<code>Json.encodeToString(value)</code> 使用 companion 约束。</li>
+  <li>默认数据模型：struct 与合格的 class 编码为按声明顺序的键值记录，tuple、数组与 <code>ArrayList</code> 编码为序列，enum 编码为只有一个键（变体名）的记录，<code>Option</code> 的 <code>None</code> 编码为 null，<code>Unit</code> 编码为 null，<code>Char</code> 编码为单字符字符串。</li>
+  <li>每个字段的 codec 在定义处确定：字段类型的 companion、核心容器的组合、递归时的自身，或 codec 主构造函数中保存的显式依赖。找不到时是编译错误，不会生成运行期失败的代码。</li>
+  <li>解码先读取全部字段再调用正常的构造函数，不会构造半初始化的对象。缺失的字段使用默认值；声明处类型为 <code>Option</code> 且没有默认值的字段补 <code>None</code>；其他缺失字段是解码错误。</li>
+  <li>编码时，声明处为 <code>Option</code>、没有默认值（或默认值就是 <code>None</code>）的字段在值为 <code>None</code> 时省略。</li>
+  <li>手写 <code>encode</code>/<code>decode</code> 方法即可覆盖合成；两个方向互相独立。开放的类层级、循环图和多态需要手写 codec。</li>
+</ul>
+<p><code>@Serialize</code> 注解调整字段或变体的映射：</p>
+<div class="table-wrap"><table>
+  <tr><th>参数</th><th>作用</th></tr>
+  <tr><td><code>rename = "…"</code></td><td>字段或 enum 变体在数据中的名称</td></tr>
+  <tr><td><code>required = true</code></td><td>解码时要求键存在，编码时总是写出</td></tr>
+  <tr><td><code>emitNull = true</code></td><td><code>None</code> 也写出（交给字段 codec），只用于声明处为 <code>Option</code> 的字段</td></tr>
+  <tr><td><code>ignore = true</code></td><td>两个方向都排除该字段，解码时它必须有默认值或是 <code>Option</code></td></tr>
+</table></div>
+<p>编码格式由普通库实现 <code>Encoder</code>/<code>Decoder</code> 接口提供。JSON 的具体规则见 <a href="stdlib.html#data">scoop.json</a>。</p>
+
+<h2 id="source-location">源码位置</h2>
+<p><code>currentSourceLocation()</code> 返回所在位置的 <code>SourceLocation(file, line, column, functionName, typeName)</code>，在编译期确定，不依赖调试信息。把它用作默认参数时，得到的是<strong>调用方</strong>的位置：</p>
+<pre><code class="language-scoop">fun trace(message: String, location: SourceLocation = currentSourceLocation()) {
+    println(f"${message} (${location.functionName}:${location.line})")
+}
+
+fun warn(message: String, location: SourceLocation = currentSourceLocation()) =
+    trace("warning: " + message, location)      // 多层转发需要继续传递 location
+
+fun main() {
+    trace("starting")
+    warn("low disk")
+}</code></pre>
+<p><code>file</code> 是与主机路径无关的逻辑路径，例如 <code>dev.example:app:0.1.0/src/main.scoop</code>。<code>currentSourceLocation</code> 只能直接调用，不能取函数引用。测试库的断言就是这样记录失败位置的。</p>
+
+<h2 id="compile-time-inputs">编译期输入</h2>
+<p><code>scoop.compiler</code> package 提供在编译期读取文件与环境的函数。它们不在默认 prelude 中，需要显式导入；实参必须是常量，结果在编译期嵌入程序，没有运行期入口，也不能取函数引用。</p>
+<div class="table-wrap"><table>
+  <tr><th>函数</th><th>结果</th></tr>
+  <tr><td><code>includeStr(path: String): String</code></td><td>文件内容，必须是合法 UTF-8，原样保留</td></tr>
+  <tr><td><code>includeBytes(path: String): Array&lt;Byte&gt;</code></td><td>文件的原始字节</td></tr>
+  <tr><td><code>includeDir(path, include = ["**"], exclude = []): EmbeddedDir</code></td><td>目录中按 glob 选中的普通文件，按相对路径排序；<code>dir[path]</code> 查找文件内容</td></tr>
+  <tr><td><code>env(name: String): String?</code></td><td>编译时宿主环境变量的值；名称必须以 <code>SCOOP_</code> 开头</td></tr>
+</table></div>
+<pre data-check="skip"><code class="language-scoop">import scoop.compiler.*
+
+const val HELP: String = includeStr("assets/help.txt")
+val icons = includeDir("assets", include = ["**/*.png"])
+val buildTag = env("SCOOP_BUILD_TAG") ?: "dev"
+
+fun main() {
+    println(HELP)
+    println(f"${icons.files.size} icons, build ${buildTag}")
+}</code></pre>
+<ul>
+  <li>相对路径以<strong>所在源文件的目录</strong>为基准，而不是当前工作目录。所有路径（包括 symlink 的目标）都必须位于定义它的 Cone 目录之内，越界是编译错误。</li>
+  <li><code>includeDir</code> 的 glob 匹配完整的相对路径：<code>*</code> 匹配一段中的任意字符，<code>?</code> 匹配一个字符，<code>[…]</code> 是字符组，完整一段的 <code>**</code> 匹配任意层目录。没有隐式的 <code>.gitignore</code> 或隐藏文件排除。</li>
+  <li><code>env</code> 只能读取 <code>SCOOP_</code> 前缀的变量，其他名称是编译错误；变量不存在为 <code>None</code>，存在但为空为 <code>Some("")</code>。交叉编译时读取的是编译机的环境。</li>
+  <li><code>includeStr</code> 与 <code>env</code> 的结果可以用于 <code>const val</code>；文件或环境变化时，相关代码会重新编译。</li>
+</ul>
+
+<h2 id="inspection">值观察与调试输出</h2>
+<p><code>ValueInspector&lt;T&gt;</code> 把值转换为只读的结构视图，<code>DebugPrinter</code> 把视图格式化为文本。与 codec 一样，在 companion 上声明实现 <code>ValueInspector&lt;T&gt;</code> 即可为 struct、enum、tuple 和普通 final class 合成实现：</p>
+<pre><code class="language-scoop">struct Point(val x: Int, val y: Int) {
+    public companion object : ValueInspector&lt;Point&gt;
+}
+
+class Credentials(val user: String, @DebugRedact val password: String, @DebugIgnore val cache: Int) {
+    public companion object : ValueInspector&lt;Credentials&gt;
+}
+
+fun main() {
+    println(DebugPrinter.format(Point.inspect(Point(1, 2))))          // Point(x=1, y=2)
+    println(DebugPrinter.format(Credentials.inspect(Credentials("ada", "hunter2", 3))))
+    // Credentials(user="ada", password="&lt;redacted&gt;")
+    println(DebugPrinter.format(Point.inspect(Point(3, 4)), DebugOptions(layout = DebugLayout.Pretty)))
+}</code></pre>
+<ul>
+  <li>视图只在打印时才读取成员，<code>DebugOptions</code> 可以限制深度、元素个数与字符串长度，并检测循环引用。</li>
+  <li><code>@DebugIgnore</code> 隐藏字段，<code>@DebugRedact</code> 以替代文本显示字段，两者都不会读取该字段。</li>
+  <li>读取成员遵守定义处的可见性规则。核心类型与容器的 companion 提供现成的 inspector。</li>
+</ul>
+
+<h2 id="generators">代码生成器</h2>
+<p>核心库的 <code>@GenerateWith(generator, interface)</code> 注解可以为类型请求外部生成器实现指定接口的方法，生成的方法体与手写代码一样参与类型检查。它面向库作者，协议见 <a href="https://github.com/windoze/scoop/blob/main/docs/milestone47/DESIGN.md">生成器设计文档</a>。Scoop 不提供通用的编译期执行语言或宏系统。</p>

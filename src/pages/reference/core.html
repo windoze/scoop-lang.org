@@ -1,0 +1,157 @@
+<!-- title: 核心库 scoop.core; nav: reference; layout: reference; description: Scoop 核心库 scoop.core 参考：默认导入的基本类型、字符串与 StringBuilder、数组与列表、迭代与区间、输出函数、异常、资源、协程、原子类型、相等/字符串化/哈希接口、编解码与类型描述、FFI 类型。 -->
+<h1>核心库 scoop.core</h1>
+<p class="intro">核心库 <code>scoop:scoop.core:0.1.0</code> 包含语言运行所必需的类型与函数。每个 Cone 都自动依赖它，其公开声明位于根 package 并<strong>默认导入</strong>（包括 <code>Option</code> 的变体 <code>Some</code>/<code>None</code>），无需任何 <code>import</code>。本页按主题列出核心库的内容，完整签名见 <a href="../api/index.html">API 文档</a>。</p>
+<p>编译期输入函数位于同一 Cone 的 <code>scoop.compiler</code> package，需要显式导入，见<a href="annotations.html#compile-time-inputs">编译期输入</a>。</p>
+
+<h2 id="types">基本类型</h2>
+<div class="table-wrap"><table>
+  <tr><th>声明</th><th>说明</th></tr>
+  <tr><td><code>Any</code>、<code>Nothing</code></td><td>顶类型与底类型，没有成员，见<a href="types.html#any-nothing">类型系统</a></td></tr>
+  <tr><td><code>Boolean</code>、<code>Char</code>、<code>Unit</code></td><td>见<a href="types.html#primitives">基本类型</a></td></tr>
+  <tr><td><code>Int8</code> <code>Int16</code> <code>Int</code> <code>Long</code> <code>UInt8</code> <code>UInt16</code> <code>UInt</code> <code>ULong</code></td><td>定宽整数及别名 <code>Byte</code>、<code>Short</code>、<code>Int32</code>、<code>Int64</code>、<code>UByte</code>、<code>UShort</code>、<code>UInt32</code>、<code>UInt64</code></td></tr>
+  <tr><td><code>Float</code>、<code>Double</code></td><td>IEEE 754 浮点及别名 <code>Float32</code>、<code>Float64</code>；<code>IeeeComparison</code></td></tr>
+  <tr><td><code>Option&lt;T&gt;</code></td><td><code>Some(T)</code> / <code>None</code>，见 <a href="option.html">Option</a></td></tr>
+  <tr><td><code>IntRange</code> <code>LongRange</code> <code>UIntRange</code> <code>ULongRange</code></td><td>整数区间，见<a href="expressions.html#ranges">区间</a></td></tr>
+</table></div>
+
+<h2 id="string">String</h2>
+<p><code>String</code> 是不可变的 UTF-8 文本，实现 <code>Equals&lt;String&gt;</code>、<code>Compare&lt;String&gt;</code>、<code>Add&lt;String, String&gt;</code>、<code>Hash</code>、<code>ToString</code> 与 <code>Iterable&lt;Char&gt;</code>。下标与计数都使用 <code>Long</code>。</p>
+<div class="table-wrap"><table>
+  <tr><th>成员</th><th>说明</th></tr>
+  <tr><td><code>byteLength: Long</code></td><td>UTF-8 字节数，O(1)</td></tr>
+  <tr><td><code>charLength: Long</code></td><td>Unicode 标量的个数，需要扫描</td></tr>
+  <tr><td><code>getCharAt(idx: Long): Char</code></td><td>第 <code>idx</code> 个标量；越界抛出 <code>IndexOutOfBoundsException</code></td></tr>
+  <tr><td><code>slice(start: Long, endExclusive: Long): String</code></td><td>按标量下标取半开区间</td></tr>
+  <tr><td><code>iterator(): Iterator&lt;Char&gt;</code></td><td>按标量顺序迭代</td></tr>
+  <tr><td><code>toCharArray()</code> / <code>toMutableCharArray()</code></td><td>独立的字符数组副本</td></tr>
+  <tr><td><code>toByteArray()</code> / <code>toMutableByteArray()</code></td><td>独立的 UTF-8 字节副本</td></tr>
+  <tr><td><code>String.fromChars(chars: List&lt;Char&gt;)</code></td><td>由字符序列构造</td></tr>
+  <tr><td><code>String.fromUtf8(bytes)</code></td><td>严格解码；非法 UTF-8 抛出 <code>CharacterCodingException</code></td></tr>
+  <tr><td><code>String.fromUtf8OrNone(bytes)</code></td><td>严格解码；非法时返回 <code>None</code></td></tr>
+  <tr><td><code>String.fromUtf8Lossy(bytes)</code></td><td>把每个非法子序列替换为 U+FFFD</td></tr>
+  <tr><td><code>String.fromUtf8Unchecked(bytes)</code></td><td><code>@Unsafe</code>：调用方保证字节是合法 UTF-8</td></tr>
+  <tr><td><code>withCString</code>、<code>withUtf8Bytes</code>、<code>String.fromCString</code>、<code>String.fromUtf8(pointer, length)</code></td><td><code>@Unsafe</code> 的原生互操作，见<a href="ffi.html#data-borrows">借用托管数据的指针</a></td></tr>
+</table></div>
+<p>字符串没有 <code>s[i]</code> 下标和 <code>length</code> 属性。查找、分割、修剪、替换、大小写转换、数值解析与格式化等文本操作由 <code>scoop.std</code> 的 <code>scoop.text</code> package 以扩展函数提供。</p>
+<pre><code class="language-scoop">fun main() {
+    val bytes: Array&lt;Byte&gt; = [0x41.toByte(), 0xFF.toByte()]
+    println(String.fromUtf8OrNone(bytes) == None)   // true
+    println(String.fromUtf8Lossy(bytes))            // A�
+    println(String.fromChars(['h', 'i']))           // hi
+    println("é".toByteArray().size)                 // 2
+}</code></pre>
+
+<h3 id="string-builder">StringBuilder 与 TextWriter</h3>
+<ul>
+  <li><code>StringBuilder(initialCapacity: Long = 0L)</code>：可变的字符串累积器。<code>append</code> 对 <code>String</code>、各整数类型、<code>Char</code>、<code>Boolean</code> 有专门的重载，另有接受任意 <code>T : ToString</code> 的泛型重载；都返回同一个 builder 以便链式调用。<code>toString()</code> 返回当前内容的独立快照，<code>clear()</code> 清空内容并保留容量。f-string 插值的语义与依次 <code>append</code> 相同。</li>
+  <li><code>TextWriter</code> 是只有 <code>write(text: String)</code> 的文本输出接口；<code>StringWriter</code> 把写入的文本累积为字符串。文件、终端与日志 writer 由相应的库提供。</li>
+</ul>
+<pre><code class="language-scoop">fun main() {
+    val sb = StringBuilder()
+    sb.append("x=").append(42).append(' ').append(true)
+    println(sb.toString())          // x=42 true
+    val w = StringWriter()
+    w.write("a")
+    w.write("b")
+    println(w.toString())           // ab
+}</code></pre>
+
+<h2 id="output">输出与进程</h2>
+<div class="table-wrap"><table>
+  <tr><th>函数</th><th>说明</th></tr>
+  <tr><td><code>print(value)</code> / <code>println(value)</code></td><td>写到 stdout；<code>println</code> 追加换行。要求 <code>T : ToString</code></td></tr>
+  <tr><td><code>eprint(value)</code> / <code>eprintln(value)</code></td><td>写到 stderr</td></tr>
+  <tr><td><code>write(message: String)</code> / <code>writeError(message: String)</code></td><td>原样写出字符串的 UTF-8 字节，不追加换行</td></tr>
+  <tr><td><code>flushOutput()</code></td><td>刷新 stdout 的缓冲</td></tr>
+  <tr><td><code>exit(code: Int): Nothing</code></td><td>刷新输出后立即结束进程，见<a href="exceptions.html#uncaught">退出</a></td></tr>
+</table></div>
+<p>输出经过 stdio 缓冲，不保证并发的 <code>println</code> 按行原子输出，也不暴露 I/O 错误。写出的是原始字节：Windows 上标准流以二进制模式打开，不做换行转换，也不改变控制台代码页。文件、进程、环境变量与命令行原始参数等平台功能位于 <code>scoop.platform</code>。</p>
+
+<h2 id="collections">数组与列表</h2>
+<pre data-check="skip"><code class="language-scoop">public interface Iterable&lt;T&gt; { public operator fun iterator(): Iterator&lt;T&gt; }
+public interface Iterator&lt;T&gt; { public fun next(): Option&lt;T&gt; }
+public interface Collection&lt;T&gt; : Iterable&lt;T&gt; { public val size: Long }
+public interface List&lt;T&gt; : Collection&lt;T&gt; { public operator fun get(index: Long): T }
+public interface MutableList&lt;T&gt; : List&lt;T&gt; {
+    public operator fun set(index: Long, value: T): Unit
+    public fun add(value: T): Unit
+    public fun add(index: Long, value: T): Unit
+    public fun removeAt(index: Long): T
+    public fun clear(): Unit
+}</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>类型</th><th>说明</th></tr>
+  <tr><td><code>Array&lt;T&gt;</code></td><td>定长、只读元素，实现 <code>List&lt;T&gt;</code>，见<a href="types.html#arrays">数组</a></td></tr>
+  <tr><td><code>MutableArray&lt;T&gt;</code></td><td>定长、可写元素，实现 <code>List&lt;T&gt;</code> 与 <code>IndexSet&lt;Long, T&gt;</code>（不实现 <code>MutableList</code>）</td></tr>
+  <tr><td><code>ArrayList&lt;T&gt;(initialCapacity: Long = 0L)</code></td><td>可增长的列表，实现 <code>MutableList&lt;T&gt;</code>；下标读写 O(1)，追加摊还 O(1)，插入与删除 O(n)</td></tr>
+</table></div>
+<ul>
+  <li><code>List</code> 只是只读<strong>访问</strong>接口，不保证内容不变：多个引用指向同一个 <code>ArrayList</code> 时，彼此能观察到修改。</li>
+  <li>下标越界抛出 <code>IndexOutOfBoundsException</code>；按下标插入时允许 <code>index == size</code>。</li>
+  <li>值类型元素内联存储，不装箱。列表不依赖元素的相等或哈希，因此没有 <code>contains</code>、按值 <code>remove</code> 或列表相等；这些操作由 <code>scoop.collections</code> 在合适的约束下提供。</li>
+  <li><code>toArray()</code> / <code>toMutableArray()</code> 取得独立的数组快照，对任何 <code>List&lt;T&gt;</code> 都可用。</li>
+  <li>迭代器在每次 <code>next()</code> 时读取当前大小，不做 fail-fast 检查：遍历期间修改列表可能导致元素被跳过或重复。</li>
+</ul>
+<pre><code class="language-scoop">fun sum(values: List&lt;Int&gt;): Int {
+    var total = 0
+    for (v in values) total += v
+    return total
+}
+
+fun main() {
+    val list = ArrayList&lt;Int&gt;()
+    list.add(1)
+    list.add(3)
+    list.add(1L, 2)                 // 插入到下标 1
+    println(list.removeAt(0L))      // 1
+    list[0] = 10
+    println(sum(list))              // 13
+    val snapshot = list.toArray()
+    list.clear()
+    println(snapshot.size)          // 2
+}</code></pre>
+<p><code>HashMap</code>、<code>TreeMap</code>、<code>HashSet</code>、<code>ArrayDeque</code>、<code>PriorityQueue</code>、排序与集合变换在 <code>scoop.std</code> 的 <code>scoop.collections</code> 中。</p>
+
+<h2 id="protocols">相等、字符串化与运算符接口</h2>
+<ul>
+  <li><code>Equals&lt;T&gt;</code>、<code>ToString</code>、<code>Hash</code>，见<a href="operators.html#equality">运算符与相等</a>；</li>
+  <li><code>Compare&lt;T&gt;</code> 以及 <code>Add</code>、<code>Sub</code>、<code>IndexGet</code>、<code>Invoke</code> 等运算符接口，见 <a href="operators.html#core-interfaces">core 运算符接口</a>。</li>
+</ul>
+
+<h2 id="exceptions">异常</h2>
+<p><code>Throwable</code>、<code>Exception</code> 以及 <code>UnwrapException</code>、<code>ClassCastException</code>、<code>ArithmeticException</code>、<code>IndexOutOfBoundsException</code>、<code>IllegalArgumentException</code>、<code>IllegalStateException</code>、<code>CharacterCodingException</code>、<code>ResourceUseException</code>、<code>MissingContextException</code>、<code>CancellationException</code>、<code>EncodingException</code>、<code>DecodingException</code>。见<a href="exceptions.html#hierarchy">异常类型</a>。</p>
+
+<h2 id="resources">资源</h2>
+<p><code>Disposable</code>、<code>Closeable</code> 与扩展函数 <code>use</code>（普通与挂起两个版本），见<a href="exceptions.html#resources">确定性资源释放</a>。</p>
+
+<h2 id="coroutines">协程</h2>
+<div class="table-wrap"><table>
+  <tr><th>声明</th><th>说明</th></tr>
+  <tr><td><code>Continuation</code>、<code>SuspendTask</code>、<code>SuspendRegistration</code>、<code>startCoroutine</code>、<code>suspendCoroutine</code></td><td>协程原语</td></tr>
+  <tr><td><code>Job</code>、<code>Deferred</code>、<code>CoroutineScope</code>、<code>coroutineScope</code>、<code>nonCancellableScope</code>、<code>currentJobOrNone</code>、<code>ensureActive</code></td><td>结构化并发</td></tr>
+  <tr><td><code>CancellableContinuation</code>、<code>suspendCancellableCoroutine</code></td><td>可取消的挂起</td></tr>
+</table></div>
+<p>见<a href="concurrency.html">协程与并发</a>。事件循环与异步 I/O 在 <code>scoop.asyncio</code> 中。</p>
+
+<h2 id="atomics">原子类型</h2>
+<p><code>AtomicInt</code>、<code>AtomicLong</code>、<code>AtomicBoolean</code>、<code>AtomicRef&lt;T : ref&gt;</code>、基于锁的 <code>Atomic&lt;T : value&gt;</code> 与 <code>MemoryOrder</code>，见<a href="concurrency.html#atomics">原子类型</a>。线程、互斥锁与条件变量在 <code>scoop.platform.concurrent</code> 中。</p>
+
+<h2 id="metadata">编解码、类型描述与调试</h2>
+<div class="table-wrap"><table>
+  <tr><th>声明</th><th>说明</th></tr>
+  <tr><td><code>ValueEncoder&lt;T&gt;</code>、<code>ValueDecoder&lt;T&gt;</code>、<code>Encoder</code>、<code>Decoder</code> 及各种容器接口、<code>Serialize</code>、<code>ValueEncoderFunction</code>、<code>ValueDecoderFunction</code>、<code>encodeList</code></td><td>与格式无关的编解码协议，见<a href="annotations.html#codecs">编解码</a></td></tr>
+  <tr><td><code>typeInfo&lt;T&gt;()</code>、<code>TypeInfo</code>、<code>TypeRef</code>、<code>TypeShape</code> 及各种 <code>…Info</code>/<code>…Ref</code>、<code>annotationKey</code>、<code>findAnnotations</code></td><td>静态类型描述，见<a href="annotations.html#type-info">类型描述</a></td></tr>
+  <tr><td><code>ValueInspector&lt;T&gt;</code>、<code>ValueView</code>、<code>DebugPrinter</code>、<code>DebugOptions</code>、<code>DebugIgnore</code>、<code>DebugRedact</code></td><td>值观察与调试输出，见<a href="annotations.html#inspection">值观察</a></td></tr>
+  <tr><td><code>SourceLocation</code>、<code>currentSourceLocation()</code></td><td>源码位置，见<a href="annotations.html#source-location">源码位置</a></td></tr>
+  <tr><td><code>Target</code>、<code>Repeatable</code>、<code>AnnotationTarget</code>、<code>DocHidden</code>、<code>DocAlias</code>、<code>GenerateWith</code></td><td>元注解与文档注解，见<a href="annotations.html">注解</a></td></tr>
+</table></div>
+
+<h2 id="ffi">原生互操作与运行时</h2>
+<div class="table-wrap"><table>
+  <tr><th>声明</th><th>说明</th></tr>
+  <tr><td><code>Extern</code>、<code>CallingConvention</code>、<code>NoGC</code>、<code>GCLeaf</code>、<code>Unsafe</code>、<code>Safe</code>、<code>CLayout</code>、<code>Global</code>、<code>ThreadLocal</code>、<code>InteriorMutable</code></td><td>核心注解，见<a href="ffi.html">原生互操作</a></td></tr>
+  <tr><td><code>Ptr&lt;T&gt;</code>、<code>FunPtr&lt;F&gt;</code>、<code>addressOf</code>、<code>sizeOf</code>、<code>alignOf</code>、<code>withDataPointer</code></td><td>原生指针与布局</td></tr>
+  <tr><td><code>MaybeUninit&lt;T&gt;</code></td><td>可能未初始化的值：<code>uninit()</code> 与 <code>initialized(v)</code> 是安全的，<code>assumeInit()</code> 是 <code>@Unsafe</code></td></tr>
+  <tr><td><code>PinnedPtr</code>、<code>GcHandle</code>、<code>pin</code>/<code>unpin</code>、<code>getGcHandle</code>/<code>releaseGcHandle</code>、<code>ForeignCallback</code>、<code>foreignCallback</code></td><td>Scoop ABI 与回调注册，供底层库使用</td></tr>
+  <tr><td><code>gcCollect()</code>、<code>gcStats()</code>、<code>gcAdjustPressure(delta)</code></td><td>请求完整回收、读取统计、向 GC 提示原生内存压力</td></tr>
+</table></div>

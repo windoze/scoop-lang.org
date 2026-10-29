@@ -1,0 +1,343 @@
+<!-- title: 函数与闭包; nav: reference; layout: reference; description: Scoop 的函数：声明与结果类型、默认参数、命名参数与 vararg、实参求值顺序、扩展函数与扩展属性、函数类型、lambda 与匿名函数、捕获规则、函数引用、重载决议与 task-local Context。 -->
+<h1>函数与闭包</h1>
+<p class="intro">函数语法整体与 Kotlin 一致：默认参数、命名参数、<code>vararg</code>、扩展函数、lambda 与尾随 lambda 都按熟悉的方式工作。最重要的差异是<strong>闭包按值捕获、不能捕获 <code>var</code></strong>，以及函数值不保留参数名和默认值。</p>
+
+<h2 id="declarations">函数声明</h2>
+<pre><code class="language-scoop">fun add(a: Int, b: Int): Int {
+    return a + b
+}
+
+fun square(x: Int) = x * x          // 表达式体，结果类型推断为 Int
+
+fun log(message: String) {          // 块体省略结果类型：返回 Unit
+    println(message)
+}
+
+fun main() {
+    log(f"${add(1, 2)} ${square(4)}")
+}</code></pre>
+<ul>
+  <li>函数可以声明在顶层、类型内部（成员函数）、其他函数内部（局部函数），或以扩展函数的形式声明。</li>
+  <li><strong>表达式体</strong> <code>= expr</code> 省略结果类型时从表达式推断；表达式体中不能使用 <code>return</code>。<strong>块体</strong>省略结果类型时结果为 <code>Unit</code>。</li>
+  <li>结果不是 <code>Unit</code> 的函数，每条能正常结束的路径都必须返回值（或抛出异常）；无法确定时是编译错误。</li>
+  <li>结果类型为 <code>Nothing</code> 的函数不能正常结束，只能抛出异常、调用另一个 <code>Nothing</code> 函数或永不结束。</li>
+  <li>递归函数的结果类型推断不能依赖自身，此时需要显式写出结果类型。推断出的签名同样受可见性约束，不能暴露私有或局部类型。</li>
+  <li>函数签名只由参数类型组成：参数名、默认值、结果类型与 <code>suspend</code> 都不能单独区分重载。</li>
+</ul>
+
+<h2 id="parameters">参数</h2>
+<p>参数可以是必需参数、带默认值的参数或 <code>vararg</code> 参数。参数在函数体内不可重新赋值。</p>
+<h3 id="defaults">默认参数</h3>
+<pre><code class="language-scoop">fun greet(name: String, greeting: String = "Hello", punctuation: String = "!"): String =
+    f"${greeting}, ${name}${punctuation}"
+
+fun window(start: Int, end: Int = start + 10): Int = end - start
+
+fun main() {
+    println(greet("Ada"))
+    println(greet("Ada", punctuation = "?"))
+    println(window(5))
+}</code></pre>
+<ul>
+  <li>默认值表达式可以引用<strong>此前</strong>的参数，不能引用自身或之后的参数。</li>
+  <li>默认值在<strong>定义处</strong>完成名称解析与类型检查，但在<strong>每次</strong>省略该参数的调用中重新求值，不会缓存。调用方的 import 或同名声明不会改变默认值的含义。</li>
+  <li>默认值中引用的声明必须在函数所有合法的调用位置可见：<code>public</code> 函数的默认值不能引用 <code>private</code> 或 <code>internal</code> 的实现细节。</li>
+  <li>抽象函数和接口方法可以声明默认值；<code>override</code> 不能重新声明默认值，而是继承被覆写声明的默认值。</li>
+</ul>
+
+<h3 id="named-arguments">命名实参</h3>
+<p>实参可以按位置传递，也可以写成 <code>name = value</code>。在跳过某个位置或改变顺序的命名实参之后，括号内的其余实参都必须命名。不能通过只写后面的位置实参来跳过中间有默认值的参数。</p>
+<pre><code class="language-scoop">fun connect(host: String, port: Int = 80, secure: Boolean = false): String =
+    f"${host}:${port} secure=${secure}"
+
+fun main() {
+    println(connect("a.example", secure = true))         // 跳过 port
+    println(connect(port = 8443, host = "b.example"))    // 任意顺序
+    println(connect(host = "c.example", 9000))           // 命名实参位于自己的位置时，之后仍可按位置传递
+}</code></pre>
+<p>覆写方法的参数名不参与匹配；命名调用使用调用点静态类型上那个声明的参数名。</p>
+
+<h3 id="vararg">vararg</h3>
+<p>一个参数列表至多有一个 <code>vararg</code> 参数。<code>vararg xs: T</code> 中的 <code>T</code> 是元素类型，函数体内 <code>xs</code> 的类型是 <code>Array&lt;T&gt;</code>：</p>
+<pre><code class="language-scoop">fun sum(vararg values: Int): Int {
+    var total = 0
+    for (v in values) total += v
+    return total
+}
+
+fun join(prefix: String, vararg parts: String, separator: String = ","): String {
+    var result = prefix
+    for (p in parts) result = result + separator + p
+    return result
+}
+
+fun main() {
+    val more = [4, 5]
+    println(sum())                    // 0：没有元素时得到新的空数组
+    println(sum(1, 2, 3))
+    println(sum(1, *more, 6))         // 展开 *array，可与普通元素混合
+    println(sum(values = more))       // 命名形式直接传入整个数组
+    println(join("p", "a", "b", separator = ";"))
+}</code></pre>
+<ul>
+  <li>位置实参到达 <code>vararg</code> 位置后，之后的未命名实参都属于它；其后的参数只能用命名实参或尾随 lambda 提供。</li>
+  <li>展开 <code>*expr</code> 要求类型正好是 <code>Array&lt;T&gt;</code>：<code>Array&lt;String&gt;</code> 不能展开给 <code>vararg xs: Any</code>。</li>
+  <li>未命名的元素（包括展开）总是复制进一个新数组，即使只有一个 <code>*array</code>；命名形式 <code>xs = array</code> 直接使用该数组。</li>
+  <li><code>vararg x: T</code> 与普通参数 <code>x: Array&lt;T&gt;</code> 的签名相同，不能据此重载。</li>
+</ul>
+
+<h3 id="trailing-lambdas">尾随 lambda</h3>
+<p>最后一个参数是函数类型时，lambda 可以写在圆括号之后；括号内没有其他实参时可以省略括号。尾随 lambda 总是对应最后一个参数，最后一个参数不能是 <code>vararg</code>。</p>
+<pre><code class="language-scoop">fun repeat(times: Int, action: (Int) -&gt; Unit) {
+    for (i in 0 until times) action(i)
+}
+
+fun measure(block: () -&gt; Int): Int = block()
+
+fun main() {
+    repeat(3) { i -&gt; print(i) }
+    println("")
+    println(measure { 40 + 2 })
+}</code></pre>
+<p><code>factory() { … }</code> 把 lambda 交给 <code>factory</code>；<code>(factory()) { … }</code> 则调用 <code>factory</code> 返回的值。每次调用最多有一个圆括号外的 lambda。</p>
+
+<h3 id="argument-evaluation">实参的求值</h3>
+<p>一次调用严格按以下顺序执行：</p>
+<ol>
+  <li>求值接收者（如果有），只求值一次；</li>
+  <li>按实参在源码中<strong>出现的顺序</strong>求值所有显式实参，不受命名映射的影响；尾随 lambda 位于最后；</li>
+  <li>按参数声明顺序组装完整的参数：构造 <code>vararg</code> 数组，并对省略的参数求值默认值；</li>
+  <li>进入函数体。</li>
+</ol>
+<p>因此所有显式实参都先于任何默认值求值。例如 <code>f(y = n(), x = m())</code> 先执行 <code>n()</code> 再执行 <code>m()</code>。</p>
+
+<h2 id="extensions">扩展函数与扩展属性</h2>
+<p>扩展函数为已有类型添加可以用成员语法调用的函数，函数体内用 <code>this</code> 访问接收者：</p>
+<pre><code class="language-scoop">fun String.shout(): String = this + "!"
+
+fun &lt;T&gt; Array&lt;T&gt;.second(): T = this[1]
+
+val String.initial: Char get() = this.getCharAt(0L)
+
+fun main() {
+    println("hey".shout())
+    println(["a", "b"].second())
+    println("Scoop".initial)
+}</code></pre>
+<ul>
+  <li>扩展是<strong>静态</strong>解析的：按接收者的静态类型选择，不做运行期分派。</li>
+  <li>同名成员优先于扩展：类型自身有适用的成员时，扩展不会被选中。</li>
+  <li>扩展不能访问接收者的 <code>private</code> 或 <code>protected</code> 成员。</li>
+  <li>扩展属性只能声明在顶层，没有 backing field，只能是计算属性或<a href="classes.html#property-delegation">委托属性</a>。泛型扩展属性的类型参数必须能由接收者类型唯一确定。</li>
+  <li>扩展可以像普通函数一样被导入、重载和引用（<code>String::shout</code>）。</li>
+</ul>
+
+<h2 id="local-functions">局部函数</h2>
+<p>函数体内可以声明具名的局部函数。局部函数在其自身体内及声明之后可见，因此可以直接递归，但不能前向调用之后声明的局部函数。局部函数与 lambda 一样遵守<a href="#captures">捕获规则</a>。</p>
+<pre><code class="language-scoop">fun main() {
+    val base = 10L
+    fun factorial(n: Long): Long = if (n &lt;= 1L) 1L else n * factorial(n - 1L)
+    fun scaled(n: Long): Long = factorial(n) * base
+    println(scaled(5L))
+}</code></pre>
+
+<h2 id="function-types">函数类型</h2>
+<p>函数类型写作 <code>(P1, P2) -&gt; R</code>，无参数时写作 <code>() -&gt; R</code>。挂起函数类型写作 <code>suspend (P) -&gt; R</code>；带接收者的函数类型写作 <code>A.(P) -&gt; R</code> 或 <code>suspend A.(P) -&gt; R</code>。</p>
+<ul>
+  <li>函数类型是<strong>引用类型</strong>。函数值可以携带捕获的环境，由 GC 管理。</li>
+  <li>函数类型的身份由是否挂起、接收者、各参数类型与结果类型决定，不包含参数名、默认值或 <code>vararg</code>。</li>
+  <li>参数类型<strong>逆变</strong>、结果类型<strong>协变</strong>：<code>(Any) -&gt; String</code> 可以用作 <code>(String) -&gt; Any</code>。普通函数类型与挂起函数类型之间没有转换。</li>
+  <li>带接收者的函数类型与“把接收者作为第一个参数”的普通函数类型可以相互适配：<code>Int.() -&gt; Int</code> 的值可以赋给 <code>(Int) -&gt; Int</code>，反之亦然。</li>
+  <li>函数值用 <code>f(args)</code> 或 <code>f.invoke(args)</code> 调用，带接收者的还可以写 <code>receiver.f(args)</code>。调用函数值时只能按位置传入与类型元数相同的实参：<strong>不支持命名实参和默认值</strong>，最后一个位置可以用尾随 lambda。</li>
+  <li>函数值没有结构相等；<code>===</code> 可以比较同一个已保存的函数值，但对同一函数多次创建的引用或 lambda 不保证相同。</li>
+</ul>
+<pre><code class="language-scoop">fun main() {
+    val general: (Any) -&gt; String = { value -&gt; "seen" }
+    val specific: (String) -&gt; Any = general            // 参数逆变、结果协变
+    val square: Int.() -&gt; Int = { this * this }
+    val flat: (Int) -&gt; Int = square                    // 接收者与首参数互相适配
+    println(f"${specific("x") is String} ${3.square()} ${flat(4)}")
+}</code></pre>
+
+<h2 id="lambdas">lambda 与匿名函数</h2>
+<p>lambda 写作 <code>{ 参数 -&gt; 函数体 }</code>，函数体中最后一个表达式的值就是结果。匿名函数写作 <code>fun(参数): R { 函数体 }</code>，使用普通函数的 <code>return</code> 规则。在它们前面加 <code>suspend</code> 得到挂起版本。</p>
+<pre><code class="language-scoop">fun apply(x: Int, f: (Int) -&gt; Int): Int = f(x)
+
+fun main() {
+    val add = { a: Int, b: Int -&gt; a + b }          // 无期望类型时需要标注参数类型
+    println(apply(5) { it * 2 })                     // 单参数可以省略参数列表，使用 it
+    println(apply(5, { x -&gt; x + add(1, 2) }))
+    val clamp = fun(x: Int): Int {
+        if (x &lt; 0) return 0
+        return x
+    }
+    println(clamp(-3))
+    val describe = fun String.(times: Int): String { return this + "×" + times.toString() }
+    println("a".describe(3))
+}</code></pre>
+<ul>
+  <li>有期望的函数类型时，参数类型可以省略；没有期望类型时，每个参数都必须标注类型。</li>
+  <li>期望类型的参数个数为 1 且省略了参数列表时，隐式参数名为 <code>it</code>。无参数的 lambda 写作 <code>{ 函数体 }</code>。</li>
+  <li>参数可以使用不可失败的<a href="values.html#destructuring">解构模式</a>：<code>{ (key, value) -&gt; … }</code>。一个模式仍然只对应一个参数。</li>
+  <li>期望结果类型为 <code>Unit</code> 时，最后一个表达式的值被丢弃。</li>
+  <li>期望类型是带接收者的函数类型时，lambda 中的 <code>this</code> 指向该接收者。</li>
+  <li>普通 lambda 不会因为期望类型是挂起函数类型而自动变成挂起 lambda，必须显式写 <code>suspend { … }</code>。</li>
+</ul>
+
+<h3 id="lambda-return">lambda 的返回</h3>
+<p>lambda 中的裸 <code>return</code> 是编译错误：Scoop 没有非局部返回。从 lambda 局部返回使用 <code>return@label</code>。直接作为具名调用实参的 lambda 自动以被调函数名为标签；也可以用 <code>label@ { … }</code> 显式命名。</p>
+<pre><code class="language-scoop">fun each(values: Array&lt;Int&gt;, action: (Int) -&gt; Unit) {
+    for (v in values) action(v)
+}
+
+fun main() {
+    each([1, 2, 3]) {
+        if (it == 2) return@each       // 只结束本次 lambda 调用
+        print(it)
+    }
+    println("")
+    each([1, 2, 3]) skip@{
+        if (it == 1) return@skip
+        print(it)
+    }
+    println("")
+}</code></pre>
+<p>标签只能命中当前函数值，不能越过嵌套的 lambda 或函数返回到更外层；<code>break</code>/<code>continue</code> 同样不能跨越函数值边界。</p>
+
+<h2 id="captures">捕获规则</h2>
+<p>lambda、匿名函数、局部函数和局部类只能捕获外层的 <code>val</code>、参数、接收者 <code>this</code> 等<strong>不可重新绑定</strong>的名称。<strong>读取或写入</strong>外层局部 <code>var</code> 都是编译错误。</p>
+<ul>
+  <li>捕获在函数值<strong>创建时按值</strong>发生：值类型复制完整的值，引用类型复制引用。</li>
+  <li>编译器不会把 <code>var</code> 隐式提升为共享单元，也不做 Java 式的 effectively-final 分析：需要捕获时先显式绑定为 <code>val</code>。</li>
+  <li>多个闭包需要共享可变状态时，显式捕获一个引用对象，并修改它的属性。</li>
+  <li>顶层属性和 <code>object</code> 的属性不是局部变量，可以直接读写；类的可变属性通过捕获的 <code>this</code> 访问。</li>
+</ul>
+<pre><code class="language-scoop">class Counter {
+    var count = 0
+}
+
+fun makeCounter(): () -&gt; Int {
+    val state = Counter()             // 捕获引用对象，而不是 var
+    return {
+        state.count += 1
+        state.count
+    }
+}
+
+fun main() {
+    val next = makeCounter()
+    next()
+    next()
+    println(next())                   // 3
+
+    var total = 10
+    val snapshot = total              // 需要当前值时先存入 val
+    val addTotal = { x: Int -&gt; x + snapshot }
+    total = 20
+    println(addTotal(1))              // 11
+}</code></pre>
+<pre data-check="error"><code class="language-scoop">fun main() {
+    var n = 0
+    val read = { n + 1 }      // 编译错误：cannot capture mutable local `n`
+}</code></pre>
+
+<h2 id="references">函数引用</h2>
+<p><code>::</code> 创建指向已有声明的函数值。函数名出现在普通值位置时<strong>不会</strong>自动变成函数值，必须显式写 <code>::name</code>。</p>
+<div class="table-wrap"><table>
+  <tr><th>写法</th><th>结果</th></tr>
+  <tr><td><code>::name</code></td><td>顶层函数或局部函数；跨 package 的函数先 <code>import</code></td></tr>
+  <tr><td><code>::TypeName</code></td><td>构造函数</td></tr>
+  <tr><td><code>Type::member</code></td><td>未绑定的成员引用，接收者成为第一个参数</td></tr>
+  <tr><td><code>receiver::member</code></td><td>绑定接收者的引用；接收者在创建时求值一次</td></tr>
+  <tr><td><code>::extension</code> / <code>receiver::extension</code></td><td>未绑定或绑定的扩展函数引用</td></tr>
+</table></div>
+<pre><code class="language-scoop">class Greeter(val name: String) {
+    fun greet(): String = f"hi, ${name}"
+}
+
+fun twice(x: Int): Int = x * 2
+fun &lt;T&gt; identity(x: T): T = x
+fun String.shout(): String = this + "!"
+
+fun main() {
+    val f = ::twice                         // (Int) -&gt; Int
+    val make = ::Greeter                    // (String) -&gt; Greeter
+    val unbound = Greeter::greet            // (Greeter) -&gt; String
+    val bound = make("Ada")::greet          // () -&gt; String
+    val id: (String) -&gt; String = ::identity // 泛型函数需要期望类型确定全部类型实参
+    val loud = String::shout
+    println(f"${f(4)} ${unbound(make("Lin"))} ${bound()} ${id("x")} ${loud("hey")}")
+}</code></pre>
+<ul>
+  <li>有重载时，由期望函数类型选择目标；没有期望类型时，只有唯一能独立确定签名的候选才能被引用。</li>
+  <li>引用虚成员或接口成员时，每次调用仍按接收者做动态分派。</li>
+  <li>函数引用不保留参数名、默认值或 <code>vararg</code> 约定，调用时必须提供完整的参数列表。</li>
+  <li>抽象类、接口和 <code>object</code> 没有可引用的构造函数。</li>
+  <li>期望类型为 <code>FunPtr&lt;F&gt;</code> 时，<code>::name</code> 解析为原生回调地址而不是函数值，见<a href="ffi.html#funptr">原生互操作</a>。</li>
+</ul>
+
+<h2 id="overloads">重载决议</h2>
+<p>同名函数可以按参数类型重载。调用时编译器按以下步骤选出唯一的目标：</p>
+<ol>
+  <li><strong>分层收集候选</strong>：先查局部声明，再查隐式 <code>this</code> 的成员，然后是块级 import、文件的显式 import、当前 package、通配 import 和核心库 prelude，完整顺序见<a href="modules.html#lookup">名称查找</a>。显式接收者的调用先查成员，再按相同的作用域层查扩展。</li>
+  <li><strong>逐层检查适用性</strong>：每个候选独立完成实参到形参的映射与泛型推断。只在第一个含有适用候选的层中选择；某一层只有同名但不适用的声明时，继续查找下一层。</li>
+  <li><strong>选择最具体的候选</strong>：若一个候选的参数都能传给另一个候选而反之不行，它更具体。仍然并列时，非泛型候选优先，实际使用默认值更少的候选优先，没有 <code>vararg</code> 的候选优先。</li>
+  <li>仍不唯一则为歧义，是编译错误；诊断会列出相关候选与失败原因。</li>
+</ol>
+<pre><code class="language-scoop">fun show(x: Any): String = "any"
+fun show(x: String): String = "string"
+
+fun size(x: Int, unit: String = "B"): String = "with default"
+fun size(x: Int): String = "exact"
+
+fun main() {
+    println(show("s") + " " + show(1))     // string any
+    println(size(1))                       // exact：使用的默认值更少
+}</code></pre>
+<ul>
+  <li>结果类型不参与重载决议，只相差结果类型的两个函数是重复声明。</li>
+  <li>整数字面量可以适配多个整数类型：<code>f(1)</code> 在 <code>f(Int)</code> 与 <code>f(Long)</code> 之间选择默认的 <code>Int</code>；若候选是 <code>f(Long)</code> 与 <code>f(Int8)</code>，两者都不是默认类型，调用有歧义。</li>
+  <li>lambda 实参由每个候选提供的期望类型检查，lambda 的结果类型不作为额外的优先规则。</li>
+</ul>
+
+<h2 id="suspend">挂起函数</h2>
+<p><code>suspend fun</code> 声明协程挂起函数，只能在另一个挂起函数或挂起 lambda 中调用；<code>main</code> 必须是普通函数。挂起性是签名的一部分，覆写时必须一致。详见<a href="concurrency.html">协程与并发</a>。</p>
+
+<h2 id="context">task-local Context</h2>
+<p>Scoop 保留 Kotlin 的 <code>context(name: T)</code> 写法，但语义是<strong>属于当前逻辑任务的动态绑定</strong>，而不是在调用点隐式传参。声明处用 <code>context(…)</code> 前缀列出所需的类型，调用方用 <code>context(value) { … }</code> 在一段代码中安装绑定：</p>
+<pre><code class="language-scoop">interface Logger {
+    fun write(message: String)
+}
+
+class ConsoleLogger : Logger {
+    override fun write(message: String) {
+        println(message)
+    }
+}
+
+context(logger: Logger)
+fun report(message: String) {
+    logger.write(f"[report] ${message}")
+}
+
+fun process() {
+    report("processing")              // 中间函数不需要声明 context
+}
+
+fun main() {
+    val logger: Logger = ConsoleLogger()
+    context(logger) {
+        process()
+    }
+}</code></pre>
+<ul>
+  <li>绑定按<strong>精确的静态类型</strong>查找，不考虑子类型：用 <code>ConsoleLogger</code> 类型的值安装的绑定不满足对 <code>Logger</code> 的需求。上例先把值赋给 <code>Logger</code> 类型的变量再安装。</li>
+  <li>进入带 <code>context(…)</code> 的函数体时按顺序取得全部绑定；缺少任一绑定时抛出 <code>MissingContextException</code>，由调用方捕获。</li>
+  <li>键必须是非空的引用类型（class、interface、<code>String</code>、数组、函数值等），值类型和 <code>Option</code> 不能直接作为键。同一列表中的键不能重复，同一类型的多种角色需要不同的包装类型。</li>
+  <li><code>context(value) { … }</code> 一次安装一个绑定，多项用嵌套。内层同类型的绑定覆盖外层，离开代码块（包括 <code>return</code>、异常）时恢复；挂起不算离开。</li>
+  <li>前缀可以用于顶层、成员、扩展和局部的具名函数，以及计算属性；不能用于构造函数、lambda、函数类型或 <code>@Extern</code>/<code>@NoGC</code> 声明。上下文列表不参与重载与函数类型。</li>
+  <li><code>startCoroutine</code>、<code>launch</code>、<code>async</code> 启动的子任务继承启动时的绑定快照，之后父子任务各自的重新绑定互不影响。普通闭包不会捕获 Context。</li>
+</ul>
+
+<h2 id="compat-modifiers">兼容修饰符</h2>
+<p><code>inline</code>、<code>noinline</code>、<code>crossinline</code>、<code>reified</code> 与 <code>tailrec</code> 为兼容 Kotlin 源码而被接受，但解析后<strong>完全忽略</strong>：它们不会内联、不做尾递归优化、不放宽 lambda 中的 <code>return</code> 或捕获限制。泛型本来就是单态化的，不需要 <code>reified</code>；是否内联由编译器自行决定。</p>

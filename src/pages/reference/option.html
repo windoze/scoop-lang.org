@@ -1,0 +1,128 @@
+<!-- title: Option 与空安全; nav: reference; layout: reference; description: Scoop 没有 null：T? 是 Option<T> 的写法，安全调用、Elvis、!! 与 as? 的精确语义，以及嵌套 Option 与模式匹配。 -->
+<h1>Option 与空安全</h1>
+<p class="intro">Scoop 在运行期没有 <code>null</code>。“可能没有值”由核心库的普通 enum <code>Option&lt;T&gt;</code> 表示，<code>T?</code> 只是它的简写。Kotlin 的空安全运算符照常可用，但它们是对 <code>Option</code> 的模式匹配，而不是空指针检查。</p>
+
+<h2 id="definition">定义</h2>
+<pre data-check="skip"><code class="language-scoop">public enum Option&lt;T&gt; {
+    Some(T),
+    None
+}</code></pre>
+<ul>
+  <li><code>T?</code> 在编译期展开为 <code>Option&lt;T&gt;</code>，二者完全等价。</li>
+  <li>展开是逐层的：<code>T??</code> 是 <code>Option&lt;Option&lt;T&gt;&gt;</code>，<code>Some(None)</code> 与 <code>None</code> 是不同的值。这与 Kotlin（<code>T??</code> 等于 <code>T?</code>）不同。</li>
+  <li><code>Some</code> 与 <code>None</code> 默认可见，不需要写 <code>Option.</code> 前缀。</li>
+  <li>构造可选值必须显式写 <code>Some(x)</code> 或 <code>None</code>：<code>val s: String? = "a"</code> 是编译错误，应写 <code>Some("a")</code>。</li>
+  <li><code>Option</code> 与所有泛型一样是不变的：<code>Option&lt;Circle&gt;</code> 不是 <code>Option&lt;Shape&gt;</code>，需要转换时用 <code>map</code> 或重新构造。</li>
+  <li>引用类型、<code>Ptr</code> 与 <code>FunPtr</code> 的 <code>Option</code> 不占用额外空间，<code>None</code> 用全零表示。</li>
+</ul>
+
+<h2 id="operators">空安全运算符</h2>
+<div class="table-wrap"><table>
+  <tr><th>表达式</th><th>等价写法</th><th>结果类型</th></tr>
+  <tr><td><code>a?.b</code></td><td><code>when (a) { case Some(v) -&gt; Some(v.b); case None -&gt; None }</code></td><td><code>B?</code></td></tr>
+  <tr><td><code>a?.f(args)</code></td><td><code>when (a) { case Some(v) -&gt; Some(v.f(args)); case None -&gt; None }</code></td><td><code>R?</code></td></tr>
+  <tr><td><code>a ?: b</code></td><td><code>when (a) { case Some(v) -&gt; v; case None -&gt; b }</code></td><td><code>T</code> 与 <code>b</code> 的共同类型</td></tr>
+  <tr><td><code>a!!</code></td><td><code>Some(v)</code> 时为 <code>v</code>，<code>None</code> 时抛出 <code>UnwrapException</code></td><td><code>T</code></td></tr>
+  <tr><td><code>e as? T</code></td><td>转换成功为 <code>Some(值)</code>，失败为 <code>None</code></td><td><code>T?</code></td></tr>
+</table></div>
+<pre><code class="language-scoop">struct User(val name: String, val email: String?)
+
+fun find(id: Int): User? = if (id == 1) Some(User("Ada", Some("ada@example.com"))) else None
+
+fun main() {
+    val name = find(2)?.name ?: "nobody"
+    println(name)                              // nobody
+    val email: String?? = find(1)?.email       // 安全调用不展平：Option&lt;Option&lt;String&gt;&gt;
+    println(email == Some(Some("ada@example.com")))
+    println(find(1)!!.name)                    // Ada
+    val any: Any = "text"
+    println(any as? String ?: "not a string")  // text
+}</code></pre>
+
+<h3 id="safe-call">安全调用</h3>
+<ul>
+  <li>接收者 <code>a</code> 只求值一次。只有在 <code>a</code> 为 <code>Some</code> 时才会求值实参、计算默认参数并调用函数；为 <code>None</code> 时这些都不发生。</li>
+  <li>结果<strong>不展平</strong>：若 <code>f</code> 返回 <code>R?</code>，<code>a?.f()</code> 的类型是 <code>R??</code>；若返回 <code>Unit</code>，结果是 <code>Unit?</code>。链式访问因此需要在每一层处理嵌套，例如先用 <code>?:</code> 合并：<code>(u?.email ?: None)?.charLength</code>。</li>
+  <li>安全调用可以作为丢弃结果的语句，例如 <code>resource?.close()</code>。</li>
+  <li>不支持通过安全调用赋值：<code>a?.b = c</code> 是编译错误。</li>
+</ul>
+<pre><code class="language-scoop">fun expensive(): Int {
+    println("evaluated")
+    return 1
+}
+
+fun main() {
+    val n: Int? = None
+    val result = n?.plus(expensive())   // n 为 None：expensive() 不会被调用
+    println(result == None)
+}</code></pre>
+
+<h3 id="elvis">Elvis 运算符</h3>
+<p><code>a ?: b</code> 先求值 <code>a</code>，只在 <code>None</code> 时求值 <code>b</code>。右侧可以是 <code>return</code>、<code>throw</code> 或其他 <code>Nothing</code> 表达式，此时整个表达式的类型就是载荷类型 <code>T</code>。Elvis 是右结合的：<code>a ?: b ?: c</code> 等于 <code>a ?: (b ?: c)</code>。</p>
+<pre><code class="language-scoop">fun describe(value: Int?): String {
+    val number = value ?: return "missing"
+    return f"number ${number}"
+}
+
+fun require(value: String?): String = value ?: throw IllegalArgumentException(Some("value required"))
+
+fun main() {
+    println(describe(None))
+    println(describe(Some(3)))
+    println(require(Some("ok")))
+}</code></pre>
+<p>Elvis 的优先级低于算术、区间和 infix 调用，高于比较与相等：<code>a ?: 1 + 2</code> 等于 <code>a ?: (1 + 2)</code>，<code>count ?: 0 &gt; 0</code> 等于 <code>(count ?: 0) &gt; 0</code>。完整优先级见<a href="expressions.html#precedence">运算符优先级</a>。</p>
+
+<h2 id="no-smart-cast">取出载荷</h2>
+<p><code>Option</code> 没有判空后的 smart cast：判断 <code>x != None</code> 之后，<code>x</code> 的类型仍是 <code>T?</code>。取出载荷有以下几种方式：</p>
+<ul>
+  <li><code>when</code> 模式，可以嵌套匹配载荷的结构；</li>
+  <li><code>?:</code> 提供缺省值或提前返回；</li>
+  <li><code>!!</code> 在确信有值时强制取出；</li>
+  <li>标准库 <code>scoop.std</code> 中的扩展函数 <code>map</code>、<code>flatMap</code>、<code>filter</code>、<code>fold</code>、<code>getOrElse</code>、<code>orElse</code> 等（需要 <code>import scoop.*</code>）。</li>
+</ul>
+<pre><code class="language-scoop">import scoop.*
+
+struct User(val name: String, val email: String?)
+
+fun contact(user: User?): String = when (user) {
+    case Some(User { email: Some(address), .. }) -&gt; address
+    case Some(User { name, .. }) -&gt; f"${name} (no email)"
+    case None -&gt; "unknown"
+}
+
+fun main() {
+    println(contact(Some(User("Ada", Some("ada@example.com")))))
+    println(contact(Some(User("Lin", None))))
+    println(contact(None))
+    val doubled = Some(21).map { it * 2 }
+    println(doubled.getOrElse { 0 })
+}</code></pre>
+<pre data-check="error"><code class="language-scoop">fun main() {
+    val x: Int? = Some(1)
+    if (x != None) {
+        println(x + 1)     // 编译错误：x 仍是 Option&lt;Int&gt;，没有 plus
+    }
+}</code></pre>
+
+<h2 id="nested">嵌套 Option</h2>
+<p>因为可空不合并，<code>Option</code> 可以精确表达“查到了一个空值”与“没查到”的区别。例如映射表中值类型本身是 <code>V?</code> 时，查询结果 <code>V??</code> 的 <code>Some(None)</code> 表示键存在但值为空，<code>None</code> 表示键不存在：</p>
+<pre><code class="language-scoop">fun lookup(key: String): Int?? = when (key) {
+    "present" -&gt; Some(Some(1))
+    "empty" -&gt; Some(None)
+    else -&gt; None
+}
+
+fun main() {
+    for (key in ["present", "empty", "missing"]) {
+        val text = when (lookup(key)) {
+            case Some(Some(v)) -&gt; f"value ${v}"
+            case Some(None) -&gt; "explicitly empty"
+            case None -&gt; "no such key"
+        }
+        println(text)
+    }
+}</code></pre>
+
+<h2 id="option-and-collections">在集合中使用</h2>
+<p><code>None</code> 是合法的元素值：<code>ArrayList&lt;Int?&gt;</code> 中的 <code>None</code> 只表示该位置的值为空，不表示位置不存在。可选值作为结构的字段时，序列化等库按声明处是否为 <code>Option</code> 决定字段能否省略，见<a href="annotations.html#codecs">编解码</a>。</p>

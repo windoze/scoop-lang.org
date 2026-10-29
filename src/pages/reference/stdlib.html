@@ -1,0 +1,89 @@
+<!-- title: 库 Cone 一览; nav: reference; layout: reference; description: Scoop 随工具链发布的库 Cone：核心库、集合与文本、平台与异步 I/O、HTTP、TLS、JSON、正则、命令行与终端。 -->
+<h1>库 Cone 一览</h1>
+<p class="intro">Scoop 工具链附带一组预编译的库 Cone，覆盖从集合、文本到 TLS、HTTP/2 与终端交互的常见需求。它们都是普通的 Scoop Cone：源码随安装包发布在 <code>~/.scoop/src</code>，每个库都有可运行的 <code>examples/</code>，完整 API 见 <a href="../api/index.html">API 文档</a>。</p>
+
+<h2 id="usage">使用内置库</h2>
+<p>内置库的 group 都是 <code>scoop</code>，当前版本为 <code>0.1.0</code>。<code>scoop.core</code> 总是可用；单文件程序还默认依赖 <code>scoop.std</code>。其他库需要显式声明：</p>
+<div class="codeblock"><div class="filename">Cone.toml</div><pre><code class="language-toml">[dependencies]
+"scoop:scoop.std" = "=0.1.0"
+"scoop:scoop.json" = "=0.1.0"
+"scoop:scoop.http.server" = "=0.1.0"</code></pre></div>
+<p>manifest Cone 除 core 外没有隐式依赖，使用 <code>scoop.std</code> 也需要像上面这样声明。单文件程序默认依赖 core 与 std，其他库在文件头写 <code>//! dep: scoop:scoop.json:0.1.0</code>。依赖本身不会导入名称，仍需 <code>import</code> 对应的包，见 <a href="modules.html#manifest">Cone.toml</a> 与<a href="modules.html#single-file">单文件模式</a>。</p>
+
+<h2 id="core">核心与基础库</h2>
+<div class="table-wrap"><table>
+  <tr><th>Cone</th><th>内容</th></tr>
+  <tr><td><a href="core.html"><code>scoop.core</code></a></td><td>语言所需的最小核心：基本类型、<code>String</code>、<code>StringBuilder</code>、<code>Option</code>、数组与 <code>ArrayList</code>、区间与迭代、异常、<code>Equals</code>/<code>Hash</code>/<code>ToString</code>/<code>Compare</code> 等运算符接口、协程原语与结构化并发、原子类型、<code>Ptr</code>/<code>FunPtr</code> 等 FFI 类型、编解码协议与 <code>typeInfo</code>。默认导入 prelude。</td></tr>
+  <tr><td><code>scoop.std</code></td><td>平台无关的基础库：<code>scoop.collections</code>（List/Map/Set、<code>HashMap</code>、<code>LinkedHashMap</code>、<code>TreeMap</code>、<code>ArrayDeque</code>、<code>PriorityQueue</code>、排序与集合运算）、<code>scoop.text</code>（查找、分割、替换、数值解析与格式化）、<code>scoop.bytes</code>、<code>scoop.io.encoding</code>（Base64、Hex）、<code>scoop.time</code> / <code>scoop.datetime</code>、<code>scoop.random</code>、<code>scoop.uuid</code>。</td></tr>
+  <tr><td><code>scoop.math</code></td><td>八种整数的受检算术、<code>Float</code>/<code>Double</code> 数学函数、不可变 <code>BigInteger</code> / <code>BigDecimal</code>，以及值类型 <code>MathContext</code> / <code>RoundingMode</code>。</td></tr>
+  <tr><td><a href="testing.html"><code>scoop.test</code></a></td><td>测试库：<code>@Test</code> 声明、断言、预期异常、前后置钩子，由 <code>scoop test</code> 驱动。</td></tr>
+</table></div>
+{{example collections}}
+{{example math}}
+
+<h2 id="platform">平台与异步 I/O</h2>
+<div class="table-wrap"><table>
+  <tr><th>Cone</th><th>内容</th></tr>
+  <tr><td><code>scoop.platform</code></td><td>同步平台 API：文件系统、目录、临时文件、环境变量、进程、线程与并发原语、网络、系统时钟与系统熵、native I/O buffer。系统字符串 <code>OsString</code> 用 WTF-8 无损保存 Windows 的 UTF-16 名称（包括非配对 surrogate），可用 <code>fromUtf16</code>/<code>toUtf16</code> 显式转换。</td></tr>
+  <tr><td><code>scoop.asyncio</code></td><td>平台事件循环 <code>PlatformEventLoop</code>：macOS 使用系统 libdispatch，Linux 使用 io_uring/liburing，Windows 使用 IOCP；提供定时器、TCP/UDP、DNS、异步文件与目录、TTY、SOCKS5，复用 core 的 Job、CoroutineScope、async/launch 与取消协议。</td></tr>
+</table></div>
+{{example coroutines}}
+<p><code>PlatformEventLoop.run</code> 是同步、单次使用的根入口，等待根作用域和子任务完成，并关闭本轮遗留资源。Linux 异步后端要求内核 6.1 及实际可用的 io_uring 能力；初始化会探测所需操作，能力不足时报错，不自动切换后端。</p>
+<p>已有宿主主循环的程序可使用 <code>PlatformEventLoop.attach</code>，由宿主监听通知并推进任务；macOS 提供 <code>MainDispatchHost</code>。具体生命周期和线程规则见<a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-ASYNCIO-SPEC.md#11-平台后端与宿主主循环迁移合同">异步 I/O 规范</a>。</p>
+
+<h2 id="net">网络与安全</h2>
+<div class="table-wrap"><table>
+  <tr><th>Cone</th><th>内容</th></tr>
+  <tr><td><code>scoop.http</code></td><td>内存中的 HTTP 协议库：HTTP/1.x（llhttp）与 HTTP/2（nghttp2）编解码、头部与消息模型、SSE、NDJSON、multipart、AWS EventStream、公共后缀表。不涉及 socket。</td></tr>
+  <tr><td><code>scoop.http.asyncio</code></td><td>在任意异步字节流上运行 HTTP 传输，连接与 TLS 由调用者提供。</td></tr>
+  <tr><td><code>scoop.http.client</code></td><td>统一的 HTTP/1.x / HTTP/2 客户端：连接池、认证、代理、缓存、下载、SSE 与 WebSocket，类型化 JSON 请求与响应。</td></tr>
+  <tr><td><code>scoop.http.server</code></td><td>纯 Scoop 的应用层 HTTP 服务器：显式路由、middleware、JSON、SSE、静态文件与 SPA、优雅关闭；不使用反射或 DI 容器。</td></tr>
+  <tr><td><code>scoop.tls</code> / <code>scoop.tls.asyncio</code></td><td>基于 OpenSSL 的同步与异步 TLS：客户端/服务端、证书与信任配置、ALPN。Windows 上的系统信任由 Crypt32 的证书链引擎验证，使用 Windows 的用户与机器信任配置。</td></tr>
+  <tr><td><code>scoop.crypto</code></td><td>摘要（SHA-256 等）、增量摘要、HMAC、对称加密、签名、X.509 与 JWS。</td></tr>
+  <tr><td><code>scoop.url</code></td><td>URI/IRI 解析、相对引用、组件拼装、百分号编码与表单 codec。</td></tr>
+  <tr><td><code>scoop.idna</code></td><td>国际化域名（UTS #46）与 Punycode。</td></tr>
+</table></div>
+<p>一个带 JSON 请求与响应的 HTTP 服务只需要几十行：</p>
+{{example http_server nooutput}}
+<p>在一个终端启动服务：</p>
+<pre><code class="language-sh">$ scoop run --release http_server.scoop</code></pre>
+<p>在另一个终端请求两个端点：</p>
+<pre><code class="language-sh">$ curl 'http://127.0.0.1:8080/greet?name=Scoop'
+{"message":"Hello, Scoop!"}
+$ curl -X POST -H 'content-type: application/json' -d '{"name":"Ada"}' http://127.0.0.1:8080/greet
+{"message":"Hello, Ada!"}</code></pre>
+<p>演示结束后，在运行服务的终端按 Ctrl+C 停止程序。</p>
+
+<h2 id="data">数据、文本与编码</h2>
+<div class="table-wrap"><table>
+  <tr><th>Cone</th><th>内容</th></tr>
+  <tr><td><code>scoop.json</code></td><td>严格 JSON 解析与生成、不可变值树、基于 <code>ValueEncoder</code>/<code>ValueDecoder</code> 的类型化编解码。</td></tr>
+  <tr><td><code>scoop.regex</code></td><td>基于 PCRE2（启用 JIT）的 UTF-8 正则：编号/命名捕获、惰性搜索、替换与分割。</td></tr>
+  <tr><td><code>scoop.charset</code></td><td>字符集严格/有损转码、NFC 规范化、字素簇分段。</td></tr>
+  <tr><td><code>scoop.compression</code></td><td>gzip、zlib、raw DEFLATE、Brotli 与 zstd；内存、增量、同步流与异步流共用一套 API。</td></tr>
+</table></div>
+{{example json}}
+
+<h2 id="tools">应用开发与终端</h2>
+<div class="table-wrap"><table>
+  <tr><th>Cone</th><th>内容</th></tr>
+  <tr><td><code>scoop.cli</code></td><td>声明式命令行解析：用注解描述位置参数、选项与开关，自动生成帮助。</td></tr>
+  <tr><td><code>scoop.log</code></td><td>日志 facade：库创建分类 <code>Logger</code>，应用选择 provider；消息惰性求值。</td></tr>
+  <tr><td><code>scoop.log.console</code></td><td>同步的 stdout/stderr 日志 provider，支持级别、格式与源码位置。</td></tr>
+  <tr><td><code>scoop.terminal</code> / <code>scoop.terminal.asyncio</code></td><td>终端控制（以 crossterm 为基线移植）：ANSI 样式、光标、原始模式、输入协议解析、异步按键与尺寸事件。Windows 上使用当前 console（启用 VT 输入输出），退出时恢复原有模式与代码页。</td></tr>
+  <tr><td><code>scoop.readline</code></td><td>交互式行编辑（移植自 rustyline）：历史、Emacs/Vi 模式、多行输入与补全；文件名补全遵循目标平台的路径语法（Windows 接受 <code>/</code> 与 <code>\</code>、盘符和 UNC 路径）。</td></tr>
+</table></div>
+{{example cli nooutput}}
+<pre><code class="language-sh">$ scoop run --release cli.scoop Ada --count 2 --excited
+Hello, Ada!
+Hello, Ada!</code></pre>
+
+<h2 id="examples">更多示例</h2>
+<p>可以先用离线示例索引查找完整程序和运行说明：</p>
+<pre><code class="language-sh">$ scoop example --list
+$ scoop example --search "异步"
+$ scoop example async/tasks</code></pre>
+<p>库源码目录中的示例也可以直接运行：</p>
+<pre><code class="language-sh">$ cd ~/.scoop/src/scoop.asyncio/examples
+$ scoop run --release tcp_echo.scoop</code></pre>
+<p>网络示例只使用本机回环地址；TLS 示例会现场生成短期证书。</p>

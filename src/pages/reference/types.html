@@ -1,0 +1,265 @@
+<!-- title: 类型系统; nav: reference; layout: reference; description: Scoop 类型系统：值类型与引用类型、Any 与 Nothing、整数与浮点数的语义、Char、String、数组、函数类型、typealias、类型检查与转换、smart cast 与类型推断。 -->
+<h1>类型系统</h1>
+<p class="intro">Scoop 是静态类型语言：每个表达式在编译期都有确定的类型。本章介绍类型的分类、内建的基本类型与数组、类型别名，以及类型检查、转换与推断的规则。用户定义的值类型见 <a href="values.html">struct、enum 与 tuple</a>，类与接口见<a href="classes.html">类、接口与对象</a>，泛型见<a href="generics.html">泛型</a>。</p>
+
+<h2 id="kinds">值类型与引用类型</h2>
+<p>Scoop 的类型分为两大类：</p>
+<div class="table-wrap"><table>
+  <tr><th></th><th>值类型</th><th>引用类型</th></tr>
+  <tr><td>包括</td><td><code>struct</code>、<code>enum</code>、tuple，以及 <code>Boolean</code>、整数、浮点、<code>Char</code>、<code>Unit</code>、<code>Ptr</code> 等基本类型</td><td><code>class</code>、<code>interface</code>、<code>object</code>、函数类型、<code>Array</code>/<code>MutableArray</code>、<code>String</code>、<code>Any</code></td></tr>
+  <tr><td>值</td><td>完整的数据本身</td><td>指向堆对象的引用</td></tr>
+  <tr><td>复制</td><td>复制全部内容</td><td>只复制引用，两份引用指向同一对象</td></tr>
+  <tr><td>identity</td><td>没有；<code>===</code> 是编译错误</td><td>有；<code>===</code> 比较是否同一对象</td></tr>
+  <tr><td>可变性</td><td>构造后不可修改</td><td>由类型自身决定，例如 <code>var</code> 属性</td></tr>
+  <tr><td>作为字段或数组元素</td><td>内联存储，不装箱</td><td>存储引用</td></tr>
+</table></div>
+<p>值类型转换为引用类型（<code>Any</code> 或它实现的接口）时自动<strong>装箱</strong>，见<a href="values.html#boxing">装箱</a>。引用类型的对象由垃圾回收器管理，不需要也不能手动释放；文件、套接字等原生资源用 <a href="exceptions.html#resources"><code>use</code></a> 确定性地关闭。</p>
+
+<h3 id="pass-by-value">参数传递</h3>
+<p>所有函数调用都<strong>按值传递</strong>：每个实参求值一次，用所得的值初始化被调函数中不可重新赋值的形参。值类型传递的是完整副本；引用类型传递的是引用的副本，因此调用双方看到同一个对象，通过它做的修改彼此可见，但在函数内给形参赋值是编译错误，也不会影响调用方的变量。方法的接收者 <code>this</code> 同样按值传递：值类型方法中的 <code>this</code> 是接收者的局部副本。</p>
+
+<h2 id="any-nothing">Any 与 Nothing</h2>
+<p><code>Any</code> 是所有类型的根类型，包括值类型。与 Kotlin 不同，<code>Any</code> <strong>没有任何成员</strong>：没有 <code>equals</code>、<code>toString</code> 或 <code>hashCode</code>。相等、字符串化和哈希分别由 <code>Equals&lt;T&gt;</code>、<code>ToString</code>、<code>Hash</code> 等接口提供，类型需要显式实现它们，见<a href="operators.html">运算符与相等</a>。因此静态类型为 <code>Any</code> 的两个值不能用 <code>==</code> 比较，也不能直接打印。</p>
+<p><code>Nothing</code> 是所有类型的子类型，没有任何值。类型为 <code>Nothing</code> 的表达式不会正常完成，例如 <code>throw</code>、<code>return</code>、<code>break</code>、<code>continue</code> 以及返回类型为 <code>Nothing</code> 的函数调用。<code>Nothing</code> 分支不参与结果类型的合并，因此可以出现在任何需要值的位置：</p>
+<pre><code class="language-scoop">fun fail(message: String): Nothing = throw IllegalStateException(Some(message))
+
+fun parsePort(text: String): Int {
+    val port = if (text == "http") 80 else fail(f"unknown scheme ${text}")
+    return port
+}
+
+fun main() {
+    println(parsePort("http"))
+}</code></pre>
+<p>声明返回 <code>Nothing</code> 的函数不能正常结束或执行 <code>return</code>。<code>Nothing</code> 不同于 <code>Unit</code>：<code>Unit</code> 有唯一的值 <code>()</code>，表示“正常完成但没有有意义的结果”。</p>
+
+<h2 id="primitives">基本类型</h2>
+<div class="table-wrap"><table>
+  <tr><th>类型</th><th>表示</th><th>别名</th></tr>
+  <tr><td><code>Boolean</code></td><td><code>true</code> / <code>false</code></td><td></td></tr>
+  <tr><td><code>Int8</code> / <code>UInt8</code></td><td>8 位有符号 / 无符号整数</td><td><code>Byte</code> / <code>UByte</code></td></tr>
+  <tr><td><code>Int16</code> / <code>UInt16</code></td><td>16 位有符号 / 无符号整数</td><td><code>Short</code> / <code>UShort</code></td></tr>
+  <tr><td><code>Int</code> / <code>UInt</code></td><td>32 位有符号 / 无符号整数</td><td><code>Int32</code> / <code>UInt32</code></td></tr>
+  <tr><td><code>Long</code> / <code>ULong</code></td><td>64 位有符号 / 无符号整数</td><td><code>Int64</code> / <code>UInt64</code></td></tr>
+  <tr><td><code>Float</code></td><td>IEEE 754 binary32</td><td><code>Float32</code></td></tr>
+  <tr><td><code>Double</code></td><td>IEEE 754 binary64</td><td><code>Float64</code></td></tr>
+  <tr><td><code>Char</code></td><td>一个 Unicode 标量值</td><td></td></tr>
+  <tr><td><code>Unit</code></td><td>唯一的值 <code>()</code>，零大小</td><td></td></tr>
+  <tr><td><code>String</code></td><td>不可变 UTF-8 文本（引用类型）</td><td></td></tr>
+</table></div>
+<p>整数宽度在所有目标上都是固定的：<code>Int</code> 永远是 32 位，<code>Long</code> 永远是 64 位，Scoop 没有随平台变化的整数类型。别名是透明的：<code>Int32</code> 与 <code>Int</code> 是同一类型，不能用来形成不同的重载。</p>
+<p>除 <code>String</code> 外，基本类型都是值类型。它们都实现了 <code>Equals</code>（同类型比较）与 <code>ToString</code>；<code>Boolean</code>、<code>Char</code>、整数和 <code>String</code> 还实现了 <code>Hash</code>，浮点数<strong>不</strong>实现 <code>Hash</code>。</p>
+
+<h2 id="integers">整数</h2>
+<h3 id="integer-arithmetic">运算</h3>
+<p>二元算术、位运算与比较要求两个操作数是<strong>同一个</strong>整数类型。不同宽度或符号的整数之间不做隐式提升，需要显式转换；字面量可以直接适配另一侧的类型：</p>
+<pre><code class="language-scoop">fun main() {
+    val count: Int = 3
+    val total: Long = 10L
+    val sum = total + count.toLong()   // 显式转换为 Long
+    val next = total + 1               // 字面量 1 直接取 Long
+    println(f"${sum} ${next}")
+}</code></pre>
+<pre data-check="error"><code class="language-scoop">fun main() {
+    val a: Int = 1
+    val b: Long = 2L
+    println(a + b)    // 编译错误：Int 与 Long 不能直接相加，需要 a.toLong()
+}</code></pre>
+<ul>
+  <li><code>+</code>、<code>-</code>、<code>*</code>、一元 <code>-</code>、<code>++</code>/<code>--</code> 按位宽<strong>回绕</strong>（二进制补码），溢出不抛异常：<code>Int.MAX_VALUE + 1 == Int.MIN_VALUE</code>。无符号类型同样支持一元 <code>-</code>，<code>-1u</code> 等于 <code>UInt.MAX_VALUE</code>。</li>
+  <li><code>/</code> 向零截断，<code>%</code> 的结果与被除数同号：<code>-7 / 2 == -3</code>，<code>-7 % 2 == -1</code>。除数为零时抛出 <code>ArithmeticException</code>；<code>MIN_VALUE / -1</code> 结果为 <code>MIN_VALUE</code>，不抛异常。</li>
+  <li>位运算是普通的 infix 方法而不是运算符：<code>and</code>、<code>or</code>、<code>xor</code>、<code>inv()</code>、<code>shl</code>、<code>shr</code>，有符号类型另有逻辑右移 <code>ushr</code>。移位次数的类型固定为 <code>Long</code>，只取低 log<sub>2</sub>(位宽) 位；有符号 <code>shr</code> 是算术右移，无符号类型的 <code>shr</code> 是逻辑右移。</li>
+  <li>比较按数学上的有符号或无符号次序；<code>compareTo</code> 返回 <code>Long</code> 类型的 <code>-1L</code>、<code>0L</code> 或 <code>1L</code>。</li>
+  <li>需要溢出检查的算术请使用 <code>scoop.math</code> 提供的受检运算，见<a href="stdlib.html#core">库 Cone 一览</a>。</li>
+</ul>
+<pre><code class="language-scoop">fun main() {
+    println(1 shl 3)            // 8
+    println((-16) shr 2)        // -4
+    println(0xF0 and 0x3C)      // 48
+    println(5.inv())            // -6
+    println(Int.MAX_VALUE + 1)  // -2147483648
+}</code></pre>
+
+<h3 id="integer-conversions">转换与常量</h3>
+<p>每种整数都提供到八种整数的显式转换 <code>toByte()</code>、<code>toShort()</code>、<code>toInt()</code>、<code>toLong()</code>、<code>toUByte()</code>、<code>toUShort()</code>、<code>toUInt()</code>、<code>toULong()</code>，以及 <code>toFloat()</code>、<code>toDouble()</code>。整数之间的转换总是成功：源值对 2<sup>目标位宽</sup> 取模后按目标的符号解释，例如 <code>300.toByte() == 44</code>，<code>(-1).toUInt() == 4294967295u</code>。到浮点的转换按目标精度舍入到最近值。</p>
+<p>每种整数的 companion 提供 <code>MIN_VALUE</code> 与 <code>MAX_VALUE</code> 常量。整数的 <code>toString()</code> 产生与区域设置无关的十进制文本。</p>
+
+<h2 id="floats">浮点数</h2>
+<p><code>Float</code> 与 <code>Double</code> 承载 IEEE 754 binary32 / binary64 的全部值，包括次正规数、正负零、无穷大和 NaN。两者之间、它们与整数之间都不做隐式转换。</p>
+<h3 id="float-arithmetic">运算与转换</h3>
+<ul>
+  <li><code>+</code> <code>-</code> <code>*</code> <code>/</code> 按目标精度最近偶数舍入。除以零、无效运算和溢出产生 IEEE 结果（无穷大或 NaN），不抛异常。编译器不会重结合运算或自动合并乘加。</li>
+  <li><code>%</code> 是以向零截断的商定义的余数（与 C 的 <code>fmod</code> 相同），不是 IEEE <code>remainder</code>：<code>7.5 % 2.0 == 1.5</code>。</li>
+  <li>浮点到整数的转换向零截断，越界时<strong>饱和</strong>到目标类型的最小或最大值，NaN 转为 0：<code>1e20.toInt() == Int.MAX_VALUE</code>，<code>(-5.0).toUInt() == 0u</code>。</li>
+  <li><code>Float</code> 到 <code>Double</code> 是精确的；<code>Double</code> 到 <code>Float</code> 按最近偶数舍入。</li>
+</ul>
+<h3 id="float-comparison">比较</h3>
+<p>浮点的 <code>==</code> 与 <code>compareTo</code> 使用一个<strong>全序</strong>，使浮点数可以安全地用作排序键和模式：</p>
+<div class="table-wrap"><table>
+  <tr><th>输入</th><th><code>==</code></th><th><code>compareTo</code></th></tr>
+  <tr><td>两个 NaN（任意符号与 payload）</td><td><code>true</code></td><td>0</td></tr>
+  <tr><td>左侧 NaN，右侧非 NaN</td><td><code>false</code></td><td>1（NaN 排在 +∞ 之后）</td></tr>
+  <tr><td><code>-0.0</code> 与 <code>+0.0</code></td><td><code>true</code></td><td>0</td></tr>
+  <tr><td>其他值</td><td>数值相等</td><td>数值次序</td></tr>
+</table></div>
+<p>这与 IEEE 比较不同：<code>x != x</code> 不能用来检测 NaN，请使用 <code>isNaN()</code>。需要 IEEE 语义时调用 <code>ieeeCompare(other)</code>，它返回 <code>IeeeComparison</code> 的 <code>Less</code>、<code>Equal</code>、<code>Greater</code> 或 <code>Unordered</code>，任一操作数为 NaN 时为 <code>Unordered</code>。比较只做分类，不改写数值：<code>1.0 / -0.0</code> 仍是负无穷。</p>
+<pre><code class="language-scoop">fun main() {
+    val nan = 0.0 / 0.0
+    println(nan == nan)                                        // true
+    println(nan.isNaN())                                       // true
+    println(nan.ieeeCompare(nan) == IeeeComparison.Unordered)  // true
+    println(-0.0 == 0.0)                                       // true
+}</code></pre>
+<h3 id="float-misc">常量、位表示与文本</h3>
+<ul>
+  <li>companion 常量：<code>NaN</code>、<code>POSITIVE_INFINITY</code>、<code>NEGATIVE_INFINITY</code>、<code>MAX_VALUE</code>（最大有限值）、<code>MIN_VALUE</code>（最小正次正规数）、<code>MIN_NORMAL</code>（最小正规格化数）。</li>
+  <li>分类方法：<code>isNaN()</code>、<code>isInfinite()</code>、<code>isFinite()</code>。</li>
+  <li><code>Float.toBits(): Int</code> / <code>Float.fromBits(bits)</code>，<code>Double.toBits(): Long</code> / <code>Double.fromBits(bits)</code> 按位重新解释，保留 NaN payload 与零的符号。</li>
+  <li><code>toString()</code> 输出能按原精度读回相同值的最短十进制数字，与区域设置无关：十进制指数在 [−3, 7) 内用定点（<code>1234567.0</code>、<code>0.001</code>），否则用科学记数法（<code>1.0e7</code>、<code>1.0e-4</code>）；总是带小数点，特殊值为 <code>NaN</code>、<code>Infinity</code>、<code>-Infinity</code>，负零为 <code>-0.0</code>。</li>
+  <li>浮点数没有 <code>Hash</code> 实现，也没有浮点区间类型。数学函数（<code>sqrt</code>、三角函数等）由 <code>scoop.math</code> 提供。</li>
+</ul>
+
+<h2 id="char">Char</h2>
+<p><code>Char</code> 表示一个 Unicode 标量值（U+0000–U+D7FF 或 U+E000–U+10FFFF），不是 UTF-16 码元，也不是用户感知的字素簇。它以 32 位存储，与整数之间没有隐式转换，也没有算术运算。</p>
+<ul>
+  <li><code>c.code: Int</code> 返回标量编号；<code>n.toChar()</code> 把 <code>Int</code> 转为 <code>Char</code>，编号不合法时抛出 <code>IllegalArgumentException</code>；</li>
+  <li>比较与相等按标量编号进行，<code>toString()</code> 返回只含该字符的字符串；</li>
+  <li><code>Char</code> 实现 <code>Hash</code>，可以作为哈希表的键，也可以用于 <code>const val</code> 和模式。</li>
+</ul>
+
+<h2 id="string">String</h2>
+<p><code>String</code> 是不可变的引用类型，保存合法的 UTF-8 文本，可以包含 U+0000。<code>+</code> 拼接两个字符串，<code>==</code>、比较与哈希都按内容进行；比较是按 Unicode 标量的字典序。</p>
+<p>字符串<strong>不支持下标</strong> <code>s[i]</code>，也没有 <code>length</code> 属性，以区分常数时间的字节计数与需要扫描的字符计数：</p>
+<pre><code class="language-scoop">fun main() {
+    val s = "A雪😀"
+    println(s.charLength)        // 3：Unicode 标量的个数，需要扫描
+    println(s.byteLength)        // 8：UTF-8 字节数，O(1)
+    println(s.getCharAt(1L))     // 雪
+    println(s.slice(1L, 3L))     // 雪😀
+    for (c in s) print(c)        // String 实现 Iterable&lt;Char&gt;
+    println("")
+}</code></pre>
+<p>字符计数与下标都使用 <code>Long</code>，越界时抛出 <code>IndexOutOfBoundsException</code>。字符串不做 Unicode 规范化，<code>"e\u0301"</code> 与 <code>"\u00E9"</code> 不相等。完整的字符串 API 见<a href="core.html#string">核心库</a>，查找、分割、替换、数值解析等文本操作由 <code>scoop.text</code> 提供。</p>
+
+<h2 id="arrays">数组</h2>
+<p>核心库提供两种定长数组，它们都是引用类型：</p>
+<ul>
+  <li><code>Array&lt;T&gt;</code>：长度固定，元素不可写；</li>
+  <li><code>MutableArray&lt;T&gt;</code>：长度固定，元素可写。</li>
+</ul>
+<p>元素为值类型时，数组保证元素不装箱、连续存放。两种数组都实现只读的 <code>List&lt;T&gt;</code>，因此可以用 <code>for</code> 遍历；长度可变的列表请使用 <a href="core.html#collections"><code>ArrayList&lt;T&gt;</code></a>。</p>
+<h3 id="array-literals">数组字面量</h3>
+<p><code>[e1, e2, …]</code> 构造一个新数组。构造 <code>Array</code> 还是 <code>MutableArray</code> 由上下文的期望类型决定，没有约束时为 <code>Array</code>。空数组 <code>[]</code> 必须有期望类型。</p>
+<ul>
+  <li>有期望类型时，每个元素都必须是期望元素类型的子类型。</li>
+  <li>没有期望类型时，若任一元素是值类型，其余元素的类型必须与它<strong>完全相同</strong>；若全部是引用类型，元素类型取它们的最小共同上界，没有唯一上界时取 <code>Any</code>（编译器给出警告）。</li>
+  <li>数组字面量中的值类型元素<strong>不会自动装箱</strong>，需要放进接口数组时显式写 <code>as</code>。</li>
+</ul>
+<pre><code class="language-scoop">interface Shape {}
+struct Square(val side: Int) : Shape
+
+fun main() {
+    val numbers = [1, 2, 3]                       // Array&lt;Int&gt;
+    val scores: MutableArray&lt;Int&gt; = [90, 85]      // MutableArray&lt;Int&gt;
+    val shapes: Array&lt;Shape&gt; = [Square(1) as Shape, Square(2) as Shape]
+    val none: Array&lt;String&gt; = []
+    println(numbers.size + scores.size + shapes.size + none.size)
+}</code></pre>
+<h3 id="array-operations">操作</h3>
+<ul>
+  <li><code>a[i]</code> 读取元素，<code>m[i] = v</code> 写入 <code>MutableArray</code> 的元素；下标类型是 <code>Long</code>，越界抛出 <code>IndexOutOfBoundsException</code>。</li>
+  <li><code>size: Long</code> 是元素个数。</li>
+  <li><code>Array&lt;T&gt;(size) { index -&gt; … }</code> 与 <code>MutableArray&lt;T&gt;(size) { … }</code> 按长度构造，依次以 <code>0L</code> 到 <code>size - 1L</code> 调用初始化函数；<code>size</code> 为负时抛出 <code>IllegalArgumentException</code>。</li>
+  <li><code>Array</code> 与 <code>MutableArray</code> 之间没有子类型关系，用 <code>m.toArray()</code>、<code>a.toMutableArray()</code> 或构造函数 <code>Array(m)</code>、<code>MutableArray(a)</code> 复制转换，结果是独立的新数组。</li>
+  <li>数组与其他泛型类型一样是<strong>不变</strong>的：即使 <code>Circle</code> 是 <code>Shape</code> 的子类型，<code>Array&lt;Circle&gt;</code> 也不是 <code>Array&lt;Shape&gt;</code>。</li>
+  <li>数组没有结构相等，不实现 <code>Equals</code> 与 <code>ToString</code>。</li>
+</ul>
+<pre><code class="language-scoop">fun main() {
+    val squares = Array&lt;Long&gt;(4L) { i -&gt; i * i }
+    val buffer: MutableArray&lt;Int&gt; = [0, 0, 0]
+    buffer[1] = 7
+    val snapshot = buffer.toArray()
+    buffer[1] = 8
+    println(f"${squares[3]} ${snapshot[1]} ${buffer[1]}")   // 9 7 8
+}</code></pre>
+
+<h2 id="function-types">函数类型</h2>
+<p>函数类型写作 <code>(P1, P2) -&gt; R</code>，挂起函数类型写作 <code>suspend (P1) -&gt; R</code>，带接收者的函数类型写作 <code>A.(P) -&gt; R</code>。函数类型是引用类型；参数逆变、返回值协变；普通与挂起函数类型之间不能转换。详见<a href="functions.html#function-types">函数与闭包</a>。</p>
+
+<h2 id="option">Option</h2>
+<p><code>T?</code> 是核心库 <code>enum Option&lt;T&gt; { Some(T), None }</code> 的写法，Scoop 在运行期没有 null。<code>T??</code> 是 <code>Option&lt;Option&lt;T&gt;&gt;</code>，与 <code>T?</code> 是不同的类型。见 <a href="option.html">Option 与空安全</a>。</p>
+
+<h2 id="typealias">类型别名</h2>
+<p><code>typealias</code> 为已有类型引入另一个名称。别名是<strong>透明</strong>的：它不创建新类型，与展开后的类型完全等价，不能据此区分重载。别名可以带类型参数，也可以声明在类型内部或代码块中：</p>
+<pre><code class="language-scoop">public typealias UserId = ULong
+typealias Names&lt;T&gt; = Array&lt;T&gt;
+typealias Transform&lt;T&gt; = (T) -&gt; T
+
+fun twice(f: Transform&lt;Int&gt;, x: Int): Int = f(f(x))
+
+fun main() {
+    typealias Point = (Int, Int)
+    val origin: Point = (0, 0)
+    val names: Names&lt;String&gt; = ["Ada", "Lin"]
+    val id: UserId = 42u
+    println(twice({ it + 1 }, origin._1) + names.size.toInt() + id.toInt())
+}</code></pre>
+<ul>
+  <li>在类型位置使用泛型别名时必须给出全部类型参数；构造调用 <code>Alias(…)</code> 可以像普通构造一样推断。</li>
+  <li>别名的展开不能直接或间接引用自身。</li>
+  <li>顶层别名默认 <code>internal</code>，不能借别名公开一个不可见的类型；局部别名不能带可见性修饰符，只在声明之后的块内可见。</li>
+</ul>
+
+<h2 id="type-checks">类型检查与转换</h2>
+<div class="table-wrap"><table>
+  <tr><th>表达式</th><th>含义</th></tr>
+  <tr><td><code>e is T</code> / <code>e !is T</code></td><td>运行期检查 <code>e</code> 的实际值是否属于 <code>T</code></td></tr>
+  <tr><td><code>e as T</code></td><td>转换为 <code>T</code>；失败时抛出 <code>ClassCastException</code></td></tr>
+  <tr><td><code>e as? T</code></td><td>转换为 <code>T?</code>；成功为 <code>Some(值)</code>，失败为 <code>None</code></td></tr>
+</table></div>
+<ul>
+  <li>值类型向引用类型的 <code>as</code>（如 <code>s as Shape</code>）会装箱；对装箱值使用 <code>is</code>/<code>as</code> 可以取回原来的值类型。</li>
+  <li>泛型<strong>没有类型擦除</strong>，检查目标必须写出完整的类型实参：<code>x is Box&lt;Int&gt;</code> 与 <code>x is Box&lt;String&gt;</code> 是不同的检查，没有 <code>Box&lt;*&gt;</code>。</li>
+  <li>函数类型按参数逆变、返回协变的结构关系检查。</li>
+  <li>enum 的变体不是类型，不能出现在 <code>is</code> 右侧；判断变体请用 <a href="patterns.html"><code>when</code> 模式</a>。</li>
+</ul>
+<pre><code class="language-scoop">struct Box&lt;T&gt;(val value: T)
+
+fun main() {
+    val boxed: Any = Box(1)
+    println(boxed is Box&lt;Int&gt;)       // true
+    println(boxed is Box&lt;String&gt;)    // false
+    val text: String? = boxed as? String
+    println(text == None)            // true
+}</code></pre>
+
+<h3 id="smart-casts">smart cast</h3>
+<p>经过 <code>is</code> 检查后，编译器在检查成立的路径上把变量当作更具体的类型使用，无需再写 <code>as</code>。类型事实沿实际执行路径传播：<code>&amp;&amp;</code>、<code>||</code>、<code>!</code> 分别建立真、假路径上的事实；<code>return</code>、<code>throw</code>、<code>break</code>、<code>continue</code> 之后的代码只考虑没有跳转的路径。</p>
+<pre><code class="language-scoop">fun describe(x: Any): String {
+    if (x !is String) return "not text"
+    return f"text of ${x.charLength} chars"     // 这里 x 被视为 String
+}
+
+fun main() {
+    var value: Any = "hello"
+    if (value is String &amp;&amp; value.charLength &gt; 3L) println(describe(value))
+    value = 42                                   // 赋值撤销此前的类型事实
+    if (value is Int) println(value + 1)
+}</code></pre>
+<ul>
+  <li>可以收窄的对象：不可变局部变量、参数、<code>when</code> subject 的 <code>val</code> 绑定、模式绑定，以及当前函数内的局部 <code>var</code>（每次重新赋值都会撤销旧的事实）。</li>
+  <li>属性、带自定义 getter 或委托的值每次读取都可能变化，不会被收窄；需要稳定视图时先存入局部 <code>val</code>，或使用 <code>when (val x = expr)</code>。</li>
+  <li>多个分支合并时只保留各路径共同成立的事实；循环中的事实对所有迭代都成立才保留。</li>
+  <li><code>as</code> / <code>as?</code> 只产生转换结果，不会让原变量在之后被收窄。</li>
+  <li><code>Option</code> <strong>没有</strong>判空收窄：判断 <code>x != None</code> 之后 <code>x</code> 仍是 <code>T?</code>，取值请用 <code>when</code>、<code>?:</code> 或 <code>!!</code>，见 <a href="option.html#no-smart-cast">Option</a>。</li>
+</ul>
+
+<h2 id="inference">类型推断</h2>
+<ul>
+  <li><strong>局部变量</strong>：<code>val x = expr</code> 的类型就是 <code>expr</code> 的类型。</li>
+  <li><strong>函数结果</strong>：表达式体函数 <code>fun f() = expr</code> 省略结果类型时从表达式推断；块体函数省略结果类型时结果为 <code>Unit</code>。递归函数需要显式结果类型来打断推断环。</li>
+  <li><strong>属性</strong>：非局部属性可以从初值、表达式 getter 或委托推断类型；没有这些来源的属性必须写类型。</li>
+  <li><strong>分支合并</strong>：<code>if</code>、<code>when</code>、<code>try</code> 作为值时，有期望类型则每个分支都必须适配它；否则取各正常分支的最小共同上界，存在多个互不可比较的上界时退化为 <code>Any</code>。泛型类型只有类型实参完全相同时才合并为同一个 application，<code>Box&lt;Int&gt;</code> 与 <code>Box&lt;Long&gt;</code> 不会合并成 <code>Box&lt;某个上界&gt;</code>。</li>
+  <li><strong>泛型调用</strong>：类型实参由全部实参与期望类型共同推断，可以用 <code>_</code> 只写出其中一部分，见<a href="generics.html#type-arguments">泛型</a>。</li>
+  <li>推断不会把无法确定的类型猜成 <code>Any</code> 或 <code>Unit</code>：空数组、没有期望类型的 <code>None</code> 和参数类型未知的 lambda 需要显式标注。</li>
+</ul>
