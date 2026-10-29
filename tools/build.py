@@ -6,7 +6,10 @@ comment, for example:
 
     <!-- title: 语言导览; nav: tour; layout: docs -->
 
-Fragments may embed verified examples from examples/ with
+``layout: docs`` adds the generated table of contents; ``layout: reference``
+also adds the reference chapter list from REFERENCE and previous/next links.
+``redirect: TARGET`` turns the page into a redirect to TARGET (relative to
+the page). Fragments may embed verified examples from examples/ with
 ``{{example NAME}}`` (adds the recorded NAME.out when present) or
 ``{{example NAME nooutput}}``. ``{{root}}`` expands to the relative path of
 the site root.
@@ -36,11 +39,45 @@ NAV = [
     ("install", "docs/install.html", "快速开始"),
     ("guides", "guides/index.html", "用户指南"),
     ("tour", "docs/tour.html", "语言导览"),
-    ("stdlib", "docs/stdlib.html", "标准库"),
+    ("reference", "reference/index.html", "参考文档"),
     ("kotlin", "docs/kotlin.html", "对比 Kotlin"),
     ("internals", "docs/internals.html", "架构"),
     ("api", "api/index.html", "API 文档"),
 ]
+
+# Reference chapters in reading order, grouped for the sidebar.
+REFERENCE = [
+    (
+        "语言参考",
+        [
+            ("reference/index.html", "概述"),
+            ("reference/lexical.html", "词法结构"),
+            ("reference/types.html", "类型系统"),
+            ("reference/values.html", "struct、enum 与 tuple"),
+            ("reference/option.html", "Option 与空安全"),
+            ("reference/expressions.html", "表达式与控制流"),
+            ("reference/patterns.html", "when 与模式匹配"),
+            ("reference/functions.html", "函数与闭包"),
+            ("reference/classes.html", "类、接口与对象"),
+            ("reference/generics.html", "泛型"),
+            ("reference/operators.html", "运算符与相等"),
+            ("reference/exceptions.html", "异常与资源"),
+            ("reference/concurrency.html", "协程与并发"),
+            ("reference/modules.html", "Cone、package 与 import"),
+            ("reference/annotations.html", "注解与编译期能力"),
+            ("reference/ffi.html", "原生互操作"),
+        ],
+    ),
+    (
+        "标准库",
+        [
+            ("reference/core.html", "核心库 scoop.core"),
+            ("reference/stdlib.html", "库 Cone 一览"),
+            ("reference/testing.html", "测试库 scoop.test"),
+        ],
+    ),
+]
+REFERENCE_PAGES = [page for _, pages in REFERENCE for page in pages]
 
 
 def parse_meta(text: str) -> tuple[dict[str, str], str]:
@@ -81,17 +118,49 @@ def render_nav(active: str, root: str) -> str:
     return "\n        ".join(links)
 
 
+def render_reference(rel: str, root: str, body: str) -> str:
+    groups = []
+    for title, pages in REFERENCE:
+        items = []
+        for href, label in pages:
+            cls = ' class="active" aria-current="page"' if href == rel else ""
+            items.append(f'<li><a href="{root}{href}"{cls}>{html.escape(label)}</a></li>')
+        groups.append(f"<h4>{title}</h4>\n<ul>\n" + "\n".join(items) + "\n</ul>")
+    index = [href for href, _ in REFERENCE_PAGES].index(rel)
+    pager = []
+    if index > 0:
+        href, label = REFERENCE_PAGES[index - 1]
+        pager.append(f'<a class="prev" href="{root}{href}"><small>上一章</small>{html.escape(label)}</a>')
+    if index + 1 < len(REFERENCE_PAGES):
+        href, label = REFERENCE_PAGES[index + 1]
+        pager.append(f'<a class="next" href="{root}{href}"><small>下一章</small>{html.escape(label)}</a>')
+    return (
+        '<div class="docs reference">\n<aside>\n'
+        + "\n".join(groups)
+        + '\n<h4>本页内容</h4><ul class="toc"></ul>\n</aside>\n'
+        f'<article>\n{body}\n<nav class="pager">{"".join(pager)}</nav>\n</article>\n</div>'
+    )
+
+
 def build_page(page: Path, layout: str, out_dir: Path) -> None:
     rel = page.relative_to(PAGES)
     meta, body = parse_meta(page.read_text())
     depth = len(rel.parts) - 1
     root = "../" * depth
+    if "redirect" in meta:
+        target = html.escape(meta["redirect"])
+        body = (
+            f'<meta http-equiv="refresh" content="0; url={target}">\n'
+            f'<div class="docs"><article><p>本页已移至 <a href="{target}">{target}</a>。</p></article></div>'
+        )
     body = EXAMPLE_RE.sub(render_example, body)
     if meta.get("layout") == "docs":
         body = (
             '<div class="docs">\n<aside><h4>本页内容</h4><ul class="toc"></ul></aside>\n'
             f"<article>\n{body}\n</article>\n</div>"
         )
+    elif meta.get("layout") == "reference":
+        body = render_reference(rel.as_posix(), root, body)
     title = meta["title"]
     full_title = "Scoop 编程语言" if title == "Scoop" else f"{title} · Scoop 编程语言"
     text = (

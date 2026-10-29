@@ -28,6 +28,8 @@ fun main() {
 scoop run hello.scoop --release
 ```
 
+Windows 工具包的主驱动名为 `sco`，对应命令写作 `sco run hello.scoop --release`；本文其余的 `scoop` 命令同样替换为 `sco`。
+
 输出：
 
 ```text
@@ -142,7 +144,7 @@ println(-7 % 3)
 
 `==`、`!=` 比较值，`<`、`<=`、`>`、`>=` 比较大小。`===` 比较引用身份，不能用于 `Int`、`struct` 等值类型。布尔运算使用 `!`、`&&`、`||`；后两者短路求值。条件必须是 `Boolean`，数字和字符串不会自动变成真假值。
 
-浮点数遵守自己的规则：除零可产生无穷大或 NaN，不抛整数除零异常。Scoop 的默认浮点比较把所有 NaN 视为相等，并排在正无穷之后；正负零相等。检测 NaN 应调用 `isNaN()`，不要沿用 `x != x` 的写法。完整边界见[数值规范](https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-SPEC.md#112-基本类型)。
+浮点数遵守自己的规则：除零可产生无穷大或 NaN，不抛整数除零异常。Scoop 的默认浮点比较把所有 NaN 视为相等，并排在正无穷之后；正负零相等。检测 NaN 应调用 `isNaN()`，不要沿用 `x != x` 的写法。完整边界见[参考文档中的浮点数](../reference/types.html#floats)。
 
 ## 4. 字符、字符串与插值
 
@@ -357,7 +359,7 @@ arguments=2
 2: hello world
 ```
 
-返回 `0` 通常表示成功，非零值用于表示错误。Scoop 接受任意 `Int` 退出码；在 macOS/Linux 的 shell 中，通常只能观察正常退出值的低 8 位。普通 CLI 使用较小的非零退出码即可。
+返回 `0` 通常表示成功，非零值用于表示错误。Scoop 接受任意 `Int` 退出码；在 macOS/Linux 的 shell 中，通常只能观察正常退出值的低 8 位；Windows 保留完整的 32 位退出码。普通 CLI 使用较小的非零退出码即可。
 
 ## 9. 完整示例：统计输入的文本
 
@@ -417,4 +419,4 @@ val displayName = nickname ?: "anonymous"
 println(displayName)
 ```
 
-这里的 `?:` 在值为 `None` 时使用右侧缺省值。下一步可以阅读[语言导览中的值类型与 Option](../docs/tour.html#structs)、[标准库概览](../docs/stdlib.html)和 [Kotlin 差异](../docs/kotlin.html)。完整规则以[语言规范](https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-SPEC.md)为准；后续专题的范围和进度见[用户文档大纲]({{ '/outline.html' | relative_url }})。
+这里的 `?:` 在值为 `None` 时使用右侧缺省值。下一步可以阅读[语言导览中的值类型与 Option](../docs/tour.html#structs)、[库 Cone 一览](../reference/stdlib.html)和 [Kotlin 差异](../docs/kotlin.html)。完整规则见[参考文档](../reference/index.html)；后续专题的范围和进度见[用户文档大纲]({{ '/outline.html' | relative_url }})。

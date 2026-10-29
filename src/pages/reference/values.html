@@ -1,0 +1,235 @@
+<!-- title: struct、enum 与 tuple; nav: reference; layout: reference; description: Scoop 的值类型：struct 的声明与构造、带载荷的 enum、整型枚举、tuple、副本更新、解构、结构相等与装箱。 -->
+<h1>struct、enum 与 tuple</h1>
+<p class="intro">Scoop 有三种用户可用的值类型：命名的积类型 <code>struct</code>、带载荷的和类型 <code>enum</code>，以及匿名的 tuple。它们都不可变、没有 identity，复制时复制完整值，作为字段或数组元素时内联存储。</p>
+
+<h2 id="structs">struct</h2>
+<p><code>struct</code> 在主构造函数中声明字段。字段只能用 <code>val</code> 声明，可以有默认值；构造时可以使用位置参数和命名参数：</p>
+<pre><code class="language-scoop">struct Config(val host: String, val port: Int = 8080, val secure: Boolean = false)
+
+fun main() {
+    val local = Config("localhost")
+    val prod = Config(host = "example.com", port = 443, secure = true)
+    println(f"${local.host}:${local.port} ${prod.secure}")
+}</code></pre>
+<ul>
+  <li>struct 构造完成后不可修改。<code>var</code> 字段、<code>init</code> 块都是编译错误。</li>
+  <li>字段不能写可见性修饰符，固定为 <code>public</code>，但实际可见范围不超过 struct 本身：默认 <code>internal</code> 的 struct，其字段也不会对其他 Cone 可见。</li>
+  <li>struct 不能继承其他类型，也不能被继承，但可以实现接口。</li>
+  <li>body 中可以声明成员函数、计算属性 <code>val p: T get() = …</code> 和 companion object，不能有存储属性或委托属性。</li>
+  <li>没有 <code>S { field: value }</code> 形式的字面量，struct 只能通过构造函数创建。</li>
+</ul>
+
+<h3 id="secondary-constructors">次构造函数</h3>
+<p>struct 可以在 body 中声明次构造函数。次构造函数的参数不声明字段（不能写 <code>val</code>），必须用 <code>this(…)</code> 直接或间接委托到主构造函数。委托先构造出完整的值，再由内向外执行各次构造函数的 body；body 可以读取字段、执行同步操作或抛出异常，但不能修改字段或 <code>return</code>。任一步抛出异常时不产生值。</p>
+<pre><code class="language-scoop">struct NonEmpty(val text: String) {
+    constructor() : this("default") {}
+    constructor(count: Int) : this("x") {
+        if (count &lt;= 0) throw IllegalArgumentException(Some("count must be positive"))
+    }
+
+    val length: Long get() = text.charLength
+
+    companion object {
+        fun of(text: String): NonEmpty = NonEmpty(text)
+    }
+}
+
+fun main() {
+    println(NonEmpty().text)
+    println(NonEmpty(3).length)
+    println(NonEmpty.of("abc").length)
+}</code></pre>
+
+<h2 id="enums">enum</h2>
+<p><code>enum</code> 定义带载荷的代数数据类型，取代 Kotlin 的 <code>enum class</code> 与大部分 <code>sealed class</code> 用法。每个变体可以采用以下形式之一：</p>
+<pre><code class="language-scoop">enum Message {
+    Quit,                                          // 单元变体
+    Move(Int, Int),                                // 位置载荷
+    Write { text: String, urgent: Boolean },       // 命名字段
+    Resize(val width: Int, val height: Int = 1)    // 构造函数式命名字段，可带默认值
+}
+
+fun main() {
+    val all = [
+        Message.Quit,
+        Message.Move(1, 2),
+        Message.Write(text = "hi", urgent = false),
+        Message.Resize(10),
+        Message.Resize(width = 3, height = 4)
+    ]
+    println(all.size)
+}</code></pre>
+<ul>
+  <li>每个变体都是一个构造器：单元变体直接写 <code>E.V</code>，带载荷的变体像函数一样调用。</li>
+  <li>花括号形式的命名字段变体只能用命名参数构造；构造函数式变体与 struct 主构造函数规则相同，可以用位置参数、命名参数和默认值。两者都没有花括号构造写法。</li>
+  <li>变体和字段的可见性固定为 <code>public</code>（不超过 enum 本身的可见范围）。</li>
+  <li>enum 本身没有构造函数、<code>init</code> 块或存储状态；body 中可以声明成员函数、计算属性 <code>val</code> 和 companion object。成员声明位于变体列表之后。</li>
+  <li>enum 可以实现接口，可以是泛型的，例如核心库的 <code>enum Option&lt;T&gt;</code>。</li>
+</ul>
+<pre><code class="language-scoop">enum Shape {
+    Circle(Double),
+    Rect { width: Double, height: Double }
+
+    val isRound: Boolean get() = when (this) {
+        case Circle(_) -&gt; true
+        case Rect { .. } -&gt; false
+    }
+
+    fun area(): Double = when (this) {
+        case Circle(r) -&gt; 3.14159 * r * r
+        case Rect { width, height } -&gt; width * height
+    }
+}
+
+fun main() {
+    val s = Shape.Rect(width = 2.0, height = 3.0)
+    println(f"${s.area()} ${s.isRound}")
+}</code></pre>
+
+<h3 id="variants-not-types">变体不是类型</h3>
+<p>变体只是构造器，不能用作变量类型、参数类型或 <code>is</code> 的检查目标。判断一个值属于哪个变体、提取载荷，都通过 <a href="patterns.html"><code>when</code> 的 case 模式</a>完成。模式中可以省略 <code>Shape.</code> 前缀，由被匹配值的类型确定。</p>
+
+<h3 id="contextual-variants">省略 enum 前缀</h3>
+<p>在表达式中，下列情况可以直接写变体名：</p>
+<ul>
+  <li>期望类型唯一确定为某个 enum（如 <code>val s: Shape = Circle(1.0)</code>、返回值、实参位置），编译器只在该 enum 内查找同名变体；</li>
+  <li>用 <code>import Shape.*</code> 导入了变体。核心库的 <code>Option</code> 就是这样默认导入的，所以可以直接写 <code>Some</code> 与 <code>None</code>。</li>
+</ul>
+<p>普通的局部变量、导入和声明优先于这种按期望类型的查找。期望类型是 <code>Any</code>、接口或尚未确定时，必须写出 <code>E.V</code> 或补充类型标注。</p>
+<pre><code class="language-scoop">enum Level { Low, High }
+
+fun pick(urgent: Boolean): Level = if (urgent) High else Low
+
+fun main() {
+    val level: Level = Low
+    println(pick(true) == Level.High)
+    println(level == Level.Low)
+}</code></pre>
+
+<h2 id="integer-enums">整型枚举</h2>
+<p><code>enum E: I { … }</code> 声明以整数类型 <code>I</code> 为父类型的整型枚举，<code>I</code> 必须是八种整数类型之一。每个变体必须写出显式的值，不能携带载荷，也不会按声明顺序自动编号；值必须是常量表达式、能被 <code>I</code> 表示，且同一 enum 中不能重复。</p>
+<pre><code class="language-scoop">enum HttpStatus: Int {
+    Ok = 200,
+    NotFound = 404,
+    Teapot = 418
+}
+
+fun main() {
+    val status = HttpStatus.NotFound
+    val code: Int = status          // 按值上转为 Int，不分配
+    println(code + 1)               // 405
+    println(status + 1)             // 运算使用 Int 的成员，结果是 Int
+}</code></pre>
+<ul>
+  <li><code>E</code> 是 <code>I</code> 的子类型，可以隐式上转为 <code>I</code>；<code>I</code> <strong>不能</strong>转回 <code>E</code>，即使数值恰好等于某个变体。</li>
+  <li>整型枚举使用 <code>I</code> 的运算与接口，结果类型是 <code>I</code>：<code>e + 1</code> 是 <code>Int</code>，<code>e += 1</code> 与 <code>e++</code> 因无法写回 <code>E</code> 而是编译错误。</li>
+  <li>以 <code>E</code> 为 subject 的 <code>when</code> 列出全部变体即可穷尽。</li>
+  <li>它与 <code>I</code> 有相同的大小和 C ABI，可以直接用于 FFI 与注解参数。外部代码只能传入已声明的值；可能出现未知数值的接口应声明为底层整数类型。</li>
+</ul>
+
+<h2 id="tuples">tuple</h2>
+<p>tuple 是匿名的积类型，无需声明。类型写作 <code>(T1, T2, …)</code>，字面量写作 <code>(e1, e2, …)</code>：</p>
+<pre><code class="language-scoop">fun divmod(a: Int, b: Int): (Int, Int) = (a / b, a % b)
+
+fun main() {
+    val pair = (1, "one")              // (Int, String)
+    val single = (42,)                 // 单元素 tuple，类型 (Int,)
+    val nothing: Unit = ()             // 零元素 tuple 就是 Unit
+    val (q, r) = divmod(17, 5)
+    println(f"${pair._2} ${single._1} ${q} ${r}")
+}</code></pre>
+<ul>
+  <li><code>()</code> 是 <code>Unit</code>；<code>(e)</code> 是带括号的表达式 <code>e</code> 本身；<code>(e,)</code> 是单元素 tuple；两个以上元素用逗号分隔。</li>
+  <li>元素通过解构或位置访问 <code>t._1</code>、<code>t._2</code>……（从 <code>_1</code> 开始）读取。</li>
+  <li>全部元素可比较时，tuple 支持结构相等 <code>==</code>。</li>
+  <li>tuple 不能声明实现接口，也不实现 <code>ToString</code>，因此不能直接打印或插值。需要这些能力时，用命名 struct 代替。</li>
+</ul>
+
+<h2 id="common-rules">值类型的通用规则</h2>
+<h3 id="immutability">不可变性与 identity</h3>
+<p>值类型实例构造后不能修改。要得到修改后的值，对 struct 使用<a href="#copy-update">副本更新</a>，对 enum 与 tuple 重新构造；把新值赋给 <code>var</code> 是重新绑定变量，不是原地修改。</p>
+<p>值类型没有 identity：对值类型使用 <code>===</code> 或 <code>!==</code> 是编译错误，比较请用 <code>==</code>。</p>
+
+<h3 id="implementing-interfaces">实现接口</h3>
+<p>struct 与 enum 可以实现接口，实现的成员必须写 <code>override</code>；覆写 <code>public</code> 接口成员（例如 <code>ToString.toString</code>）时还要写 <code>public</code>，因为成员默认是 <code>internal</code>。值类型的方法总是 final。接口若要求可写属性（<code>var</code>），值类型不能实现它。</p>
+<pre><code class="language-scoop">interface Describable {
+    fun describe(): String
+}
+
+struct Point(val x: Int, val y: Int) : Describable, ToString {
+    override fun describe(): String = f"point at ${x},${y}"
+    public override fun toString(): String = f"(${x}, ${y})"
+}
+
+fun main() {
+    val p = Point(1, 2)
+    val d: Describable = p      // 装箱
+    println(d.describe())
+    println(p)
+}</code></pre>
+
+<h3 id="boxing">装箱</h3>
+<p>值类型转换为引用类型（<code>Any</code> 或实现的接口）时自动装箱为堆对象。装箱后的对象不可变、具有 identity，<code>==</code> 按装箱后的静态类型查找 <code>equals</code>。用 <code>is</code>、<code>as</code>、<code>as?</code> 或模式可以取回原来的值。</p>
+<p>自动装箱只发生在单个值的转换上：赋值、实参、返回值等。数组字面量这类批量位置不会自动装箱，需要对每个元素显式写 <code>as</code>，见<a href="types.html#array-literals">数组字面量</a>。</p>
+
+<h2 id="copy-update">副本更新</h2>
+<p><code>base.{ field: expr, … }</code> 基于一个已有的 struct 值创建修改了部分字段的新值，原值不变：</p>
+<pre><code class="language-scoop">struct Settings(val width: Int, val height: Int, val title: String)
+
+fun main() {
+    val base = Settings(800, 600, "untitled")
+    val wide = base.{ width: 1920, title: "wide" }
+    var current = base
+    current = current.{ height: 720 }     // 重新绑定 var，不是原地修改
+    println(f"${wide.width}x${wide.height} ${current.height} ${base.height}")
+}</code></pre>
+<ul>
+  <li><code>base</code> 先求值且只求值一次，其静态类型必须正好是某个 struct；enum（即使是命名字段变体）、class、tuple 都不支持副本更新。</li>
+  <li>字段列表不能为空，字段名不能重复，也不能写嵌套路径；各右侧表达式按书写顺序求值，未提及的字段从 <code>base</code> 复制。</li>
+  <li>没有穿透 Option 的 <code>opt?.{ … }</code>，请先用 <code>when</code> 或 <code>?.</code> 取出 struct。</li>
+</ul>
+
+<h2 id="destructuring">解构</h2>
+<p><code>val</code>/<code>var</code> 声明、<code>for</code> 循环变量和 lambda 参数都可以使用<strong>解构模式</strong>，一次绑定多个名称。解构模式必须对静态类型<strong>不可失败</strong>：可以包含名称、<code>_</code>、<code>..</code> 以及嵌套的 tuple/struct 模式，不能包含字面量或 enum 变体（这些可能失败的模式只能用在 <a href="patterns.html"><code>when</code></a> 中）。</p>
+<pre><code class="language-scoop">struct User(val id: Long, val name: String, val email: String)
+
+fun main() {
+    val user = User(1L, "Ada", "ada@example.com")
+    val (id, name, _) = user                    // 按字段顺序
+    val User { email, .. } = user               // 按字段名，.. 忽略其余字段
+    val User { name: displayName, .. } = user   // 重命名
+    val (first, .., last) = (1, 2, 3, 4)        // .. 跳过中间元素
+    val (n, (a, b)) = (7, ("x", "y"))           // 嵌套
+    println(f"${id} ${name} ${email} ${displayName} ${first + last} ${n}${a}${b}")
+
+    for ((index, word) in [(1, "one"), (2, "two")]) {
+        println(f"${index}: ${word}")
+    }
+    val add: ((Int, Int)) -&gt; Int = { (x, y) -&gt; x + y }
+    println(add((3, 4)))
+}</code></pre>
+<ul>
+  <li><strong>位置模式</strong> <code>(p1, p2, …)</code> 适用于 tuple 与 struct（按主构造函数的字段顺序）。不使用 <code>..</code> 时元素个数必须一致。</li>
+  <li><strong>字段模式</strong> <code>S { f1, f2: p, .. }</code> 适用于 struct。<code>f1</code> 是 <code>f1: f1</code> 的简写；冒号右侧可以是新名称、<code>_</code> 或嵌套模式。未列出全部字段时必须以 <code>..</code> 结尾；类型前缀 <code>S</code> 可以省略。</li>
+  <li><code>..</code> 在位置模式中至多出现一次，可以位于开头、中间或结尾，表示忽略任意多个元素；在字段模式中只能位于末尾。</li>
+  <li>普通 class 与接口可以通过 <code>operator fun component1()</code>、<code>component2()</code>……支持位置解构（不能使用 <code>..</code>），见<a href="operators.html#components">运算符</a>。struct 与 tuple 的解构是内建的，不查找 <code>componentN</code>。</li>
+  <li>被解构的值只求值一次；<code>var</code> 解构声明中只有叶子名称是可变的。</li>
+  <li>在解构模式中，单独的标识符<strong>总是</strong>新绑定，即使它与某个 enum 变体同名。</li>
+</ul>
+<pre data-check="error"><code class="language-scoop">fun main() {
+    val maybe: Int? = Some(1)
+    val Some(x) = maybe      // 编译错误：可能失败的模式只能用于 when
+}</code></pre>
+<p>lambda 参数使用解构模式时，参数类型由期望的函数类型提供，如上例的 <code>add</code>。</p>
+
+<h2 id="equality">结构相等</h2>
+<p>struct、enum 和 tuple 在全部字段（或元素、当前变体的载荷）都可以比较时，自动获得同类型的 <code>==</code>：struct 与 tuple 按声明顺序逐个比较并短路；enum 先比较变体，再比较载荷。浮点字段沿用<a href="types.html#float-comparison">浮点的默认相等</a>。</p>
+<ul>
+  <li>自动生成的只有 <code>==</code> 运算符，类型<strong>不会</strong>因此实现 <code>Equals&lt;T&gt;</code> 接口；需要作为 <code>HashMap</code> 键或满足 <code>T : Equals&lt;T&gt;</code> 时，显式声明并实现该接口。</li>
+  <li>字段不可比较（例如某个 class 字段没有 <code>equals</code>）时，构造和传递不受影响，只有实际使用 <code>==</code> 的地方会报错。</li>
+  <li>手写同签名的 <code>operator fun equals(other: S): Boolean</code> 会取代自动生成的比较。</li>
+  <li><code>ToString</code> 与 <code>Hash</code> 从不自动派生，需要显式实现，见<a href="operators.html#tostring">运算符与相等</a>。</li>
+</ul>
+
+<h2 id="zst">零大小类型</h2>
+<p><code>Unit</code>、没有字段的 struct，以及所有字段都是零大小类型的 struct 或 tuple，大小都为 0。它们仍是各自独立的类型，构造和调用的副作用照常执行；<code>Array&lt;Unit&gt;</code> 等数组不分配元素存储，但长度与下标检查保持不变。</p>

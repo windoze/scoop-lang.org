@@ -1,0 +1,215 @@
+<!-- title: 表达式与控制流; nav: reference; layout: reference; description: Scoop 的语句与表达式：局部声明、运算符优先级、if/when/try 表达式、while/do-while/for 循环、区间、标签、break/continue/return 与求值顺序。 -->
+<h1>表达式与控制流</h1>
+<p class="intro">本章介绍函数体中的语句、运算符与控制结构。Scoop 的控制流语法沿用 Kotlin：<code>if</code>、<code>when</code> 与 <code>try</code> 都是表达式，<code>return</code>、<code>break</code>、<code>continue</code> 和 <code>throw</code> 可以出现在表达式位置。<code>when</code> 的模式匹配见 <a href="patterns.html">when 与模式匹配</a>。</p>
+
+<h2 id="statements">语句</h2>
+<p>代码块 <code>{ … }</code> 由一系列语句组成，每个块建立自己的词法作用域。语句可以是：</p>
+<ul>
+  <li><strong>局部声明</strong>：<code>val</code>/<code>var</code> 变量（可以使用<a href="values.html#destructuring">解构</a>）、局部函数、局部 class/struct/enum/interface、<code>typealias</code>，以及块级 <a href="modules.html#block-imports"><code>import</code></a>；</li>
+  <li><strong>赋值</strong>：<code>x = e</code>、复合赋值 <code>x += e</code>、自增自减 <code>x++</code>；赋值本身不是表达式，不能出现在其他表达式内部；</li>
+  <li><strong>表达式语句</strong>：函数或方法调用（包括安全调用），以及 <code>if</code>、<code>when</code>、<code>try</code>、循环、<code>return</code>、<code>break</code>、<code>continue</code>、<code>throw</code>。其他表达式单独成为语句是编译错误，例如一行只写 <code>a + b</code>、<code>x!!</code> 或构造调用 <code>Point(1, 2)</code>；只需要副作用时，可以把结果绑定给 <code>val _ = …</code>。</li>
+</ul>
+<pre><code class="language-scoop">fun main() {
+    val limit = 3                 // 不可重新赋值
+    var count = 0                 // 可变
+    count += limit
+    count++
+    val x = 1
+    if (count &gt; 0) {
+        val x = 2                 // 内层块可以遮蔽外层名称
+        println(x)
+    }
+    println(f"${count} ${x}")
+}</code></pre>
+<ul>
+  <li>局部变量必须在声明处初始化；类型可以省略，由初值推断。</li>
+  <li>同一个作用域内不能重复声明同名变量；内层块可以声明与外层同名的变量来遮蔽它。</li>
+  <li><code>val</code> 只表示绑定不可重新赋值，不表示所引用的对象不可变。</li>
+  <li>局部函数与局部类型在声明之后可见（局部函数在自身体内也可见，可以直接递归），不能前向引用。</li>
+</ul>
+
+<h2 id="precedence">运算符优先级</h2>
+<p>下表从高到低列出运算符的优先级，同一行的运算符优先级相同。二元运算符都是左结合，Elvis <code>?:</code> 是右结合。</p>
+<div class="table-wrap"><table>
+  <tr><th>类别</th><th>运算符</th></tr>
+  <tr><td>后缀</td><td><code>a.b</code> <code>a?.b</code> <code>a(…)</code> <code>a[…]</code> <code>a!!</code> <code>a++</code> <code>a--</code> <code>a::b</code></td></tr>
+  <tr><td>前缀</td><td><code>-a</code> <code>+a</code> <code>!a</code> <code>++a</code> <code>--a</code></td></tr>
+  <tr><td>类型转换</td><td><code>as</code> <code>as?</code></td></tr>
+  <tr><td>乘法</td><td><code>*</code> <code>/</code> <code>%</code></td></tr>
+  <tr><td>加法</td><td><code>+</code> <code>-</code></td></tr>
+  <tr><td>区间</td><td><code>..</code> <code>..&lt;</code></td></tr>
+  <tr><td>中缀函数</td><td><code>a name b</code>，如 <code>until</code>、<code>downTo</code>、<code>step</code>、<code>and</code>、<code>or</code>、<code>shl</code></td></tr>
+  <tr><td>Elvis</td><td><code>?:</code></td></tr>
+  <tr><td>包含与类型检查</td><td><code>in</code> <code>!in</code> <code>is</code> <code>!is</code></td></tr>
+  <tr><td>比较</td><td><code>&lt;</code> <code>&gt;</code> <code>&lt;=</code> <code>&gt;=</code></td></tr>
+  <tr><td>相等</td><td><code>==</code> <code>!=</code> <code>===</code> <code>!==</code></td></tr>
+  <tr><td>逻辑与</td><td><code>&amp;&amp;</code></td></tr>
+  <tr><td>逻辑或</td><td><code>||</code></td></tr>
+  <tr><td>赋值（语句）</td><td><code>=</code> <code>+=</code> <code>-=</code> <code>*=</code> <code>/=</code> <code>%=</code></td></tr>
+</table></div>
+<p>因为位运算是中缀函数，它们的优先级低于算术和区间、高于比较：<code>flags and mask == 0</code> 等于 <code>(flags and mask) == 0</code>，<code>a and b + 1</code> 等于 <code>a and (b + 1)</code>。中缀函数之间没有自定义优先级，一律左结合。</p>
+
+<h2 id="operators">运算符概览</h2>
+<ul>
+  <li><strong>算术</strong> <code>+ - * / %</code> 与比较 <code>&lt; &lt;= &gt; &gt;=</code> 对数值类型是内建的，对其他类型通过 <a href="operators.html"><code>operator</code> 函数</a>重载。数值运算要求两侧类型相同，见<a href="types.html#integers">整数</a>与<a href="types.html#floats">浮点数</a>。</li>
+  <li><strong>相等</strong> <code>==</code>/<code>!=</code> 调用左侧静态类型上的 <code>operator fun equals</code>；<code>===</code>/<code>!==</code> 比较引用 identity，只能用于引用类型。见<a href="operators.html#equality">相等</a>。</li>
+  <li><strong>逻辑</strong> <code>&amp;&amp;</code>、<code>||</code> 只接受 <code>Boolean</code>，短路求值；<code>!</code> 取反。它们不能重载。</li>
+  <li><strong>包含</strong> <code>a in b</code> 调用 <code>b.contains(a)</code>，<code>!in</code> 对结果取反。</li>
+  <li><strong>字符串拼接</strong> <code>s + t</code> 要求两侧都是 <code>String</code>；拼接其他值请用 <a href="lexical.html#fstrings">f-string</a>。</li>
+  <li><strong>空安全</strong> <code>?.</code>、<code>?:</code>、<code>!!</code> 见 <a href="option.html">Option 与空安全</a>；<strong>类型运算</strong> <code>is</code>、<code>as</code>、<code>as?</code> 见<a href="types.html#type-checks">类型检查与转换</a>。</li>
+</ul>
+
+<h2 id="if">if 表达式</h2>
+<p><code>if</code> 既可以作为语句，也可以作为表达式。作为值使用时必须有 <code>else</code> 分支；分支是代码块时，块中最后一个表达式的值就是分支的值。分支也可以是单个语句或表达式，不必写花括号。<code>else if</code> 就是 <code>else</code> 分支中嵌套的 <code>if</code>。</p>
+<pre><code class="language-scoop">fun sign(x: Int): Int {
+    if (x &lt; 0) return -1 else if (x &gt; 0) return 1
+    return 0
+}
+
+fun classify(x: Int): String {
+    val size = if (x &gt; 100) {
+        val excess = x - 100
+        f"large (+${excess})"
+    } else "small"
+    return size
+}
+
+fun main() {
+    println(sign(-5))
+    println(classify(150))
+}</code></pre>
+<p>值位置的 <code>if</code> 缺少 <code>else</code> 是编译错误。各分支结果的类型按<a href="types.html#inference">分支合并规则</a>确定；以 <code>return</code>、<code>throw</code> 等结束的分支不参与合并。空块或以声明、赋值结尾的块的值是 <code>Unit</code>。</p>
+
+<h2 id="when-expressions">when 表达式</h2>
+<p><code>when</code> 依次检查各分支条件，执行第一个成立的分支。不带 subject 时每个条件都是 <code>Boolean</code> 表达式，可以替代 <code>if</code>-<code>else if</code> 链：</p>
+<pre><code class="language-scoop">fun grade(score: Int): String = when {
+    score &gt;= 90 -&gt; "A"
+    score &gt;= 75 -&gt; "B"
+    else -&gt; "C"
+}
+
+fun main() {
+    println(grade(80))
+}</code></pre>
+<p>带 subject 的 <code>when</code>、类型分支、<code>in</code> 分支、<code>case</code> 模式和穷尽性规则见 <a href="patterns.html">when 与模式匹配</a>。</p>
+
+<h2 id="try">try 表达式</h2>
+<p><code>try</code> 也是表达式：结果是正常完成的 <code>try</code> 块或所执行的 <code>catch</code> 块的最后一个表达式；<code>finally</code> 块的值总是被丢弃。</p>
+<pre><code class="language-scoop">fun parse(text: String): Int = try {
+    if (text == "bad") throw IllegalArgumentException(Some("bad input"))
+    text.charLength.toInt()
+} catch (e: IllegalArgumentException) {
+    -1
+} finally {
+    println("parsed")
+}
+
+fun main() {
+    println(parse("bad"))
+    println(parse("good"))
+}</code></pre>
+<p>异常的匹配规则与 <code>finally</code> 的执行时机见<a href="exceptions.html">异常与资源</a>。</p>
+
+<h2 id="loops">循环</h2>
+<h3 id="while">while 与 do-while</h3>
+<p><code>while (条件) 循环体</code> 在每轮开始前求值条件。<code>do 循环体 while (条件)</code> 先执行循环体，再求值条件；循环体最外层声明的名称在条件中可见，在循环之后不可见。</p>
+<pre><code class="language-scoop">fun main() {
+    var i = 0
+    while (i &lt; 3) i++
+
+    var total = 0
+    do {
+        val next = total + i
+        total = next
+    } while (next &lt; 10)
+    println(f"${i} ${total}")
+}</code></pre>
+
+<h3 id="for">for</h3>
+<p><code>for (模式 in 源) 循环体</code> 遍历任何提供 <code>operator fun iterator()</code> 的值，包括数组、列表、字符串、区间和各种集合。执行过程：</p>
+<ol>
+  <li>源表达式求值一次，再调用一次 <code>iterator()</code>；返回值必须实现唯一一个 <code>Iterator&lt;T&gt;</code>；</li>
+  <li>每轮调用一次 <code>next()</code>：返回 <code>Some(v)</code> 时把 <code>v</code> 绑定到循环变量并执行循环体，返回 <code>None</code> 时结束循环。</li>
+</ol>
+<p>每一轮的循环变量都是新的只读绑定，闭包捕获的是该轮的值。循环变量位置可以写不可失败的<a href="values.html#destructuring">解构模式</a>，但不能写 <code>Some(x)</code> 这类可能失败的模式。</p>
+<pre><code class="language-scoop">fun main() {
+    for (word in ["alpha", "beta"]) println(word)
+    for (c in "雪😀") print(c)
+    println("")
+    for ((name, score) in [("Ada", 90), ("Lin", 85)]) println(f"${name}: ${score}")
+}</code></pre>
+
+<h3 id="ranges">区间</h3>
+<p>整数类型提供以下构造区间的成员。结果是 <code>IntRange</code>、<code>LongRange</code>、<code>UIntRange</code> 或 <code>ULongRange</code>：<code>Int8</code>/<code>Int16</code>/<code>Int</code> 得到 <code>IntRange</code>（元素为 <code>Int</code>），<code>UInt8</code>/<code>UInt16</code>/<code>UInt</code> 得到 <code>UIntRange</code>，<code>Long</code>、<code>ULong</code> 各自得到同名区间。</p>
+<div class="table-wrap"><table>
+  <tr><th>写法</th><th>含义</th></tr>
+  <tr><td><code>a..b</code></td><td>从 <code>a</code> 升序到 <code>b</code>，包含 <code>b</code>；<code>a &gt; b</code> 时为空</td></tr>
+  <tr><td><code>a..&lt;b</code>、<code>a until b</code></td><td>从 <code>a</code> 升序，不包含 <code>b</code>；<code>a &gt;= b</code> 时为空</td></tr>
+  <tr><td><code>a downTo b</code></td><td>从 <code>a</code> 降序到 <code>b</code>，包含 <code>b</code>；<code>a &lt; b</code> 时为空</td></tr>
+  <tr><td><code>r step n</code></td><td>保持方向与端点，把步长改为 <code>n</code>；<code>n</code> 必须为正，否则抛出 <code>IllegalArgumentException</code></td></tr>
+  <tr><td><code>x in r</code></td><td><code>x</code> 位于端点范围内且与起点按步长对齐</td></tr>
+</table></div>
+<pre><code class="language-scoop">fun main() {
+    for (i in 10 downTo 1 step 3) print(f"${i} ")      // 10 7 4 1
+    println("")
+    for (i in 0 until 10 step 4) print(f"${i} ")       // 0 4 8
+    println("")
+    println(4 in (0..10 step 2))                        // true
+    for (i in Int.MAX_VALUE - 1..Int.MAX_VALUE) print(f"${i} ")   // 端点为 MAX_VALUE 也能正确结束
+    println("")
+}</code></pre>
+<p>区间是不可变对象，每次 <code>iterator()</code> 都从起点开始。迭代在越过端点或即将溢出前停止，因此 <code>MIN_VALUE</code>/<code>MAX_VALUE</code> 端点是安全的。没有 <code>Char</code> 区间或浮点区间。</p>
+
+<h2 id="jumps">跳转</h2>
+<h3 id="break-continue">break 与 continue</h3>
+<p><code>break</code> 退出最内层循环，<code>continue</code> 进入它的下一轮：<code>while</code> 与 <code>do-while</code> 重新求值条件，<code>for</code> 调用下一次 <code>next()</code>。用 <code>label@</code> 给循环加标签后，<code>break@label</code> 与 <code>continue@label</code> 作用于该循环：</p>
+<pre><code class="language-scoop">fun main() {
+    outer@ for (i in 0..3) {
+        for (j in 0..3) {
+            if (j == 2) continue@outer
+            if (i == 2) break@outer
+            print(f"${i}${j} ")
+        }
+    }
+    println("")      // 00 01 10 11
+}</code></pre>
+<p>标签只能用于循环和 lambda 等函数值，不提供 goto，也不能跳出普通块。<code>break</code>/<code>continue</code> 不能越过函数边界：lambda、匿名函数和局部函数中不能跳出外层函数的循环。</p>
+
+<h3 id="return">return</h3>
+<p><code>return 表达式</code> 从当前具名函数或匿名函数返回；返回 <code>Unit</code> 的函数可以写裸 <code>return</code>。表达式体函数（<code>fun f() = …</code>）中不能使用 <code>return</code>。lambda 中的裸 <code>return</code> 是编译错误，要从 lambda 局部返回请使用 <code>return@label</code>，标签默认是接收该 lambda 的函数名，见 <a href="functions.html#lambda-return">lambda 的返回</a>。</p>
+
+<h3 id="jump-expressions">跳转表达式</h3>
+<p><code>return</code>、<code>break</code>、<code>continue</code> 与 <code>throw</code> 在表达式位置的类型是 <code>Nothing</code>，可以出现在 Elvis 右侧、分支或实参中：</p>
+<pre><code class="language-scoop">fun firstPositive(values: Array&lt;Int&gt;): Int? {
+    for (v in values) {
+        val positive = if (v &gt; 0) v else continue
+        return Some(positive)
+    }
+    return None
+}
+
+fun main() {
+    println(firstPositive([-1, 0, 3, 5]) ?: 0)
+}</code></pre>
+<p>跳转发生时，后续的实参、默认参数和外层调用都不会执行；沿途的 <code>finally</code> 块按从内到外的顺序执行。</p>
+
+<h2 id="evaluation-order">求值顺序</h2>
+<p>Scoop 严格从左到右求值，并保证每个子表达式只求值一次：</p>
+<ul>
+  <li>二元运算先求值左操作数，再求值右操作数。唯一的例外是 <code>a in b</code> 与 <code>a !in b</code>：它们等价于 <code>b.contains(a)</code>，先求值 <code>b</code>（与 Kotlin 相同）。</li>
+  <li>调用先求值接收者，再按实参在源码中<strong>出现的顺序</strong>求值，不受命名实参映射到哪个形参的影响；所有显式实参都先于默认参数求值，见<a href="functions.html#argument-evaluation">实参的求值</a>。</li>
+  <li>复合赋值与自增自减中，接收者与下标只求值一次：<code>a[i()] += v()</code> 依次求值 <code>a</code>、<code>i()</code>、<code>v()</code>。</li>
+  <li><code>&amp;&amp;</code>、<code>||</code>、<code>?:</code>、<code>?.</code> 的右侧只在需要时求值。</li>
+</ul>
+<pre><code class="language-scoop">fun log(tag: String, value: Int): Int {
+    print(tag)
+    return value
+}
+
+fun diff(x: Int, y: Int): Int = x - y
+
+fun main() {
+    val inside = log("a", 1) in log("b", 0)..log("c", 5)   // 输出 bca
+    println("")
+    println(diff(y = log("y", 1), x = log("x", 3)))       // 输出 yx2
+}</code></pre>

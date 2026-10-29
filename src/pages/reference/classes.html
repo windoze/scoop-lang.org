@@ -1,0 +1,459 @@
+<!-- title: 类、接口与对象; nav: reference; layout: reference; description: Scoop 的引用类型：class 的构造与初始化顺序、属性与访问器、继承与覆写、接口与默认实现、object 与 companion、嵌套/inner/局部/匿名类型、sealed、委托、可见性、条件接口实现与 release 块。 -->
+<h1>类、接口与对象</h1>
+<p class="intro"><code>class</code>、<code>interface</code>、<code>object</code> 与 <code>companion object</code> 是引用类型，语法与 Kotlin 基本一致。主要差异：类与成员默认 <code>final</code>，默认可见性是 <code>internal</code>，构造期间对 <code>this</code> 的使用受到严格限制，没有 <code>data class</code> 与 <code>lateinit</code>。</p>
+
+<h2 id="classes">class</h2>
+<pre><code class="language-scoop">class Account(val owner: String, initial: Long) {
+    var balance: Long = initial
+    private val history = ArrayList&lt;Long&gt;()
+
+    fun deposit(amount: Long) {
+        if (amount &lt;= 0L) throw IllegalArgumentException(Some("amount must be positive"))
+        balance += amount
+        history.add(amount)
+    }
+
+    val transactions: Long get() = history.size
+}
+
+fun main() {
+    val account = Account("Ada", 100L)
+    account.deposit(50L)
+    println(f"${account.owner} ${account.balance} ${account.transactions}")
+}</code></pre>
+<ul>
+  <li>类可以继承一个类、实现任意多个接口；类默认 <code>final</code>，需要 <code>open</code>、<code>abstract</code> 或 <code>sealed</code> 才能被继承。</li>
+  <li>类的对象具有 identity，<code>===</code> 比较是否同一对象。类不会自动获得 <code>==</code>、<code>toString</code> 或哈希，需要时显式声明，见<a href="operators.html">运算符与相等</a>。</li>
+  <li>没有 <code>data class</code>：需要结构相等、副本更新与解构的数据请使用 <a href="values.html#structs"><code>struct</code></a>。</li>
+</ul>
+
+<h2 id="constructors">构造函数</h2>
+<h3 id="primary-constructor">主构造函数</h3>
+<p>类名后的参数列表声明主构造函数。参数写 <code>val</code>/<code>var</code> 时同时声明属性；不写时是普通构造参数，只在基类构造实参、属性初始值与 <code>init</code> 块中可见，不能在成员函数中使用。</p>
+<pre><code class="language-scoop">class Point(val x: Int, val y: Int, label: String) {
+    val description = f"${label} at ${x},${y}"     // 普通参数只能在初始化中使用
+}
+
+fun main() {
+    println(Point(1, 2, "p").description)
+}</code></pre>
+<ul>
+  <li>既没有写主构造函数也没有次构造函数的类，有一个隐式的零参数构造函数。</li>
+  <li>构造函数默认是 <code>internal</code>，与其他声明一样。<code>public</code> 类要对其他 Cone 提供构造入口，必须写 <code>public constructor</code>：<code>public class User public constructor(val name: String)</code>。给主构造函数加修饰符或注解时都需要显式的 <code>constructor</code> 关键字。</li>
+  <li>主构造参数与次构造函数都支持默认参数、命名参数和 <code>vararg</code>；<code>vararg val xs: T</code> 声明的属性类型是 <code>Array&lt;T&gt;</code>。</li>
+</ul>
+
+<h3 id="secondary-constructors">次构造函数</h3>
+<p>次构造函数写作 <code>constructor(参数) : this(实参) { 函数体 }</code> 或 <code>: super(实参)</code>。次构造函数的参数不能写 <code>val</code>/<code>var</code>。</p>
+<ul>
+  <li>有主构造函数时，每个次构造函数都必须经 <code>this(…)</code> 直接或间接委托到主构造函数。</li>
+  <li>没有主构造函数时，每条委托链都终止于一次 <code>super(…)</code>；省略委托等价于 <code>super()</code>。</li>
+  <li>委托链不能成环。主构造函数与所有次构造函数共同组成一组重载。</li>
+</ul>
+
+<h3 id="initialization">初始化顺序</h3>
+<p>构造一个对象时依次执行：</p>
+<ol>
+  <li>调用方求值构造实参；</li>
+  <li>分配对象，所有字段从零值开始；</li>
+  <li>执行基类的完整构造（递归地遵守同样的顺序）；</li>
+  <li>写入带 <code>val</code>/<code>var</code> 的主构造参数；求值<a href="#interface-delegation">接口委托</a>表达式；</li>
+  <li>按源码顺序交替执行属性初始值和 <code>init</code> 块；</li>
+  <li>由内向外执行次构造函数的函数体。</li>
+</ol>
+<pre><code class="language-scoop">fun trace(tag: String): String {
+    println(tag)
+    return tag
+}
+
+open class Base(name: String) {
+    val baseLabel = trace("base property")
+    init { trace("base init") }
+}
+
+class Derived(name: String) : Base(trace("base argument")) {
+    val first = trace("first property")
+    init { trace("derived init") }
+    val second = trace("second property")
+    constructor() : this("anonymous") { trace("secondary body") }
+}
+
+fun main() {
+    val d = Derived()
+}</code></pre>
+<p>输出依次为 <code>base argument</code>、<code>base property</code>、<code>base init</code>、<code>first property</code>、<code>derived init</code>、<code>second property</code>、<code>secondary body</code>。任一步骤抛出异常时，后续步骤不执行，构造表达式不产生对象。</p>
+
+<h3 id="initializing-this">构造期间的 this</h3>
+<p>在构造函数、属性初始值和 <code>init</code> 块中，<code>this</code> 只能用于读写<strong>已经初始化</strong>的字段。它不能作为普通值传给函数、存储、返回或被 lambda 捕获，也不能用来调用成员方法（包括虚方法）。因此构造期间不会观察到尚未初始化的字段，基类构造也不会经虚调用进入派生类。</p>
+<pre data-check="error"><code class="language-scoop">class Config {
+    val a = 1
+    fun doubled(): Int = a * 2
+    val b = doubled()        // 编译错误：构造完成前不能通过 this 调用方法
+    val c = d + 1            // 编译错误：d 尚未初始化
+    val d = 2
+}</code></pre>
+<p>需要复杂计算时，把逻辑放在顶层函数或 companion 中，以参数形式传入数据。构造期间也不能调用挂起函数；构造函数中可以执行 <code>throw</code>，但不能 <code>return</code>。</p>
+
+<h2 id="properties">属性</h2>
+<div class="table-wrap"><table>
+  <tr><th>形式</th><th>含义</th></tr>
+  <tr><td><code>val p: T = expr</code> / <code>var p: T = expr</code></td><td>存储属性，有 backing field，可以自定义访问器</td></tr>
+  <tr><td><code>val p: T get() = expr</code></td><td>计算属性，没有存储</td></tr>
+  <tr><td><code>var p: T get() = … set(value) { … }</code></td><td>可写的计算属性，必须同时提供 getter 和 setter</td></tr>
+  <tr><td><code>var p: T?</code>（省略初值）</td><td>初值为 <code>None</code> 的可选存储属性</td></tr>
+  <tr><td><code>val/var p: T by expr</code></td><td><a href="#property-delegation">委托属性</a></td></tr>
+  <tr><td><code>abstract val/var p: T</code></td><td>由子类实现的抽象属性</td></tr>
+</table></div>
+<pre><code class="language-scoop">class Temperature {
+    var celsius: Double = 0.0
+        set(value) {
+            if (value &lt; -273.15) throw IllegalArgumentException(Some("below absolute zero"))
+            field = value
+        }
+
+    val fahrenheit: Double get() = celsius * 9.0 / 5.0 + 32.0
+
+    var note: String?                    // 省略初值：None
+
+    var readings: Int = 0
+        private set(value) { field = value }
+
+    fun record(value: Double) {
+        celsius = value
+        readings++
+    }
+}
+
+fun main() {
+    val t = Temperature()
+    t.record(100.0)
+    println(f"${t.fahrenheit} ${t.readings} ${t.note == None}")
+}</code></pre>
+<ul>
+  <li>getter 没有参数；setter 恰有一个参数（通常命名为 <code>value</code>）并返回 <code>Unit</code>。<code>val</code> 不能有 setter。</li>
+  <li><code>field</code> 只在存储属性访问器的函数体内表示 backing field。</li>
+  <li>setter 可以声明比属性更窄的可见性，例如 <code>private set(value) { field = value }</code>；目前必须写出 setter 的函数体。</li>
+  <li><strong>Scoop 不支持 <code>lateinit</code></strong>。唯一可以省略初值的存储属性是 <code>var p: T?</code>，其初值为 <code>None</code>；<code>val p: T?</code> 与 <code>var p: T</code> 仍须提供初值。</li>
+  <li>属性可以从初值或 getter 推断类型；没有类型来源（例如块体 getter、抽象属性）时必须写类型。</li>
+  <li>访问器总是同步、非挂起的；需要异步取得的值应暴露为 <code>suspend fun</code>。</li>
+</ul>
+
+<h3 id="const">常量</h3>
+<p><code>const val</code> 声明编译期常量，只能出现在顶层、<code>object</code> 或 companion 中，必须写出类型和初值。初值必须是常量表达式：字面量、其他 <code>const val</code>、内建运算符与数值转换的组合。常量的类型可以是基本类型、<code>String</code>、<code>Unit</code>，或字段全部为常量的 struct、tuple 与 enum 值。普通函数调用、构造调用和 f-string 不是常量表达式。</p>
+<pre><code class="language-scoop">const val MAX_RETRIES: Int = 3
+const val TIMEOUT_MS: Long = MAX_RETRIES.toLong() * 1000L
+const val GREETING: String = "hello"
+
+object Limits {
+    const val PAGE: Int = 50
+}
+
+fun main() {
+    println(f"${TIMEOUT_MS} ${GREETING} ${Limits.PAGE}")
+}</code></pre>
+<p>读取 object 中的 <code>const val</code> 不会触发该 object 的初始化。</p>
+
+<h3 id="top-level-properties">顶层属性</h3>
+<p>顶层 <code>val</code>/<code>var</code> 可以保存任意类型的值。需要运行期计算的顶层属性在进入 <code>main</code> 之前同步初始化一次；同一 Cone 内的初始化顺序是确定的，但不按文件书写顺序，因此初始值不应依赖其他文件中顶层属性的副作用顺序。初始化表达式之间直接形成的依赖环是编译错误。一组相关的全局状态建议放在 <code>object</code> 中。</p>
+
+<h2 id="inheritance">继承与覆写</h2>
+<pre><code class="language-scoop">abstract class Animal(val name: String) {
+    abstract fun sound(): String
+    open fun describe(): String = f"${name} says ${sound()}"
+}
+
+open class Dog(name: String) : Animal(name) {
+    override fun sound(): String = "woof"
+}
+
+class Puppy(name: String) : Dog(name) {
+    final override fun describe(): String = super.describe() + " (puppy)"
+}
+
+fun main() {
+    val pets: Array&lt;Animal&gt; = [Dog("Rex"), Puppy("Bit")]
+    for (p in pets) println(p.describe())
+}</code></pre>
+<ul>
+  <li>派生类在类头写出基类与构造实参 <code>: Base(args)</code>；没有主构造函数的类只写基类类型，由次构造函数调用 <code>super(args)</code>。</li>
+  <li>方法与属性默认 <code>final</code>；首次允许覆写需要 <code>open</code>。<code>abstract</code> 成员隐含 <code>open</code>，只能出现在抽象类或接口中。</li>
+  <li>覆写必须写 <code>override</code>；<code>override</code> 成员默认仍可被进一步覆写，<code>final override</code> 终止覆写。</li>
+  <li>属性覆写要求名称和类型完全相同；<code>var</code> 可以覆写 <code>val</code>，反之不行。</li>
+  <li><code>super.member(…)</code> 直接调用直接基类中的实现，不经过虚分派；<code>super</code> 不是独立的表达式。</li>
+  <li>抽象类不能直接构造；具体类必须实现继承来的全部抽象成员。</li>
+  <li>泛型方法不能是 <code>open</code>、<code>abstract</code> 或 <code>override</code>，见<a href="generics.html#generic-methods">泛型方法</a>。</li>
+</ul>
+
+<h2 id="interfaces">接口</h2>
+<p>接口可以声明抽象方法、带默认实现的方法和属性，不能有字段、初值、构造函数或 <code>init</code> 块。接口声明需要 body，空接口写作 <code>interface Marker {}</code>。</p>
+<pre><code class="language-scoop">interface Named {
+    val name: String
+    fun greet(): String = f"hi, ${greetingName()}"
+    private fun greetingName(): String = name     // private 辅助方法必须有函数体
+}
+
+interface Loud {
+    fun greet(): String = "HEY"
+}
+
+class Person(override val name: String) : Named, Loud {
+    override fun greet(): String = super&lt;Named&gt;.greet() + " / " + super&lt;Loud&gt;.greet()
+}
+
+fun main() {
+    println(Person("Ada").greet())
+}</code></pre>
+<ul>
+  <li>类继承的方法优先于接口默认实现；多个互不相关的默认实现冲突时，必须显式覆写，可以用 <code>super&lt;I&gt;.member</code> 调用某个直接父接口的默认实现。</li>
+  <li>接口方法不能声明自己的类型参数，见<a href="generics.html#generic-methods">泛型方法</a>。</li>
+  <li>接口成员同样默认 <code>internal</code>。<code>public</code> 接口的抽象成员必须显式写 <code>public</code>，实现它的成员要写 <code>public override</code>。</li>
+  <li>struct 与 enum 也可以实现接口，但不能实现要求 setter 的 <code>var</code> 属性。</li>
+</ul>
+
+<h2 id="objects">object 与 companion</h2>
+<p><code>object O { … }</code> 同时声明一个类型和它唯一的实例。object 可以继承一个类、实现接口，但不能有构造函数，<code>O()</code> 是编译错误。</p>
+<pre><code class="language-scoop">object Registry {
+    init { println("registry initialized") }
+    val names = ArrayList&lt;String&gt;()
+    fun register(name: String) {
+        names.add(name)
+    }
+}
+
+class User private constructor(val name: String) {
+    companion object Factory {
+        fun create(name: String): User = User(name)
+    }
+}
+
+fun main() {
+    println("start")
+    Registry.register("scoop")         // 首次访问时初始化
+    println(Registry.names.size)
+    println(User.create("Ada").name)
+    println(User.Factory.create("Lin").name)
+}</code></pre>
+<ul>
+  <li>object 与 companion 在首次访问时线程安全地初始化一次。初始化失败时异常会被记住，之后的访问都抛出同一异常，不会重试；初始化中形成的循环依赖抛出 <code>IllegalStateException</code>。</li>
+  <li>class、struct、enum、interface 与 object 各自至多有一个 companion object，省略名称时名为 <code>Companion</code>。companion 的成员可以用类型名直接访问：<code>User.create(…)</code>。</li>
+  <li>companion 不会被派生类继承，也不出现在实例的成员查找中。</li>
+  <li><strong>泛型类型的每个完整类型实参都有独立的 companion</strong>：<code>Box&lt;Int&gt;.Companion</code> 与 <code>Box&lt;String&gt;.Companion</code> 是不同的对象，各有自己的状态。引用泛型类型的 companion 时必须写出完整的类型实参，例如 <code>Box&lt;Int&gt;.create(1)</code>；companion 中可以使用宿主的类型参数。</li>
+</ul>
+<pre><code class="language-scoop">class Box&lt;T&gt;(val value: T) {
+    companion object {
+        var created: Int = 0
+        fun make(value: T): Box&lt;T&gt; = Box(value)
+    }
+}
+
+fun main() {
+    Box&lt;Int&gt;.created = 3
+    val b = Box&lt;String&gt;.make("x")
+    println(f"${Box&lt;Int&gt;.created} ${Box&lt;String&gt;.created} ${b.value}")   // 3 0 x
+}</code></pre>
+
+<h2 id="nested-types">嵌套、inner 与局部类型</h2>
+<ul>
+  <li><strong>嵌套类型</strong>：类型 body 中声明的 class、struct、enum、interface、object 是静态嵌套的，不能访问外层实例或外层的类型参数，通过 <code>Outer.Nested</code> 引用。</li>
+  <li><strong>inner class</strong>：只能直接声明在 class 中，持有外层实例的引用，可以使用外层的成员和类型参数。创建时需要外层实例：<code>outer.Inner(…)</code>，在外层的成员中可以省略 <code>outer</code>；<code>this@Outer</code> 指外层实例。</li>
+  <li><strong>局部类型</strong>：代码块中可以声明 class、struct、enum 和 interface，它们在声明之后的块内可见，不能带可见性修饰符。局部 class 可以捕获外层的不可变绑定（遵守<a href="functions.html#captures">捕获规则</a>）。</li>
+  <li><strong>匿名对象</strong>：<code>object : Base(args), I { … }</code> 是表达式，每次求值创建一个新的匿名 final 类实例。</li>
+</ul>
+<pre><code class="language-scoop">interface Shape {
+    fun area(): Double
+}
+
+class Outer(val tag: String) {
+    inner class Inner(val n: Int) {
+        fun show(): String = f"${tag}-${n}"      // 访问外层实例的属性
+    }
+    class Nested {
+        fun show(): String = "nested"
+    }
+}
+
+fun main() {
+    val outer = Outer("o")
+    println(outer.Inner(1).show())
+    println(Outer.Nested().show())
+
+    val side = 3.0
+    val square = object : Shape {
+        override fun area(): Double = side * side
+    }
+    class Circle(val r: Double) : Shape {
+        override fun area(): Double = 3.14159 * r * r
+    }
+    println(square.area() + Circle(1.0).area())
+}</code></pre>
+<p>局部变量可以保留匿名对象的类型并访问它自己的成员；非局部函数或属性不能推断出匿名类型或局部类型作为签名，需要显式标注为可见的父类型。</p>
+
+<h2 id="sealed">sealed 类型</h2>
+<p><code>sealed class</code> 与 <code>sealed interface</code> 限制直接子类型：直接子类型必须与 sealed 声明位于同一个 Cone 的同一个 package，并且是具名的非局部声明（可以是 class、object、struct 或 enum）。<code>when</code> 根据这个封闭的集合检查穷尽性，见<a href="patterns.html#exhaustiveness">穷尽性</a>。</p>
+<pre><code class="language-scoop">sealed class Result {
+    class Success(val value: Int) : Result()
+    class Failure(val message: String) : Result()
+    object Pending : Result()
+}
+
+fun render(r: Result): String = when (r) {
+    is Result.Success -&gt; f"ok ${r.value}"
+    is Result.Failure -&gt; f"error ${r.message}"
+    is Result.Pending -&gt; "pending"
+}
+
+fun main() {
+    println(render(Result.Success(1)))
+    println(render(Result.Pending))
+}</code></pre>
+<ul>
+  <li><code>sealed class</code> 隐含 <code>abstract</code>，不能直接构造；其构造函数只能是 <code>protected</code>（默认）或 <code>private</code>。</li>
+  <li>子类型本身可以是 <code>open</code> 或继续 <code>sealed</code>；非 sealed 的子类型代表一个开放的家族，<code>is Child</code> 覆盖整个家族。</li>
+  <li>匿名 object 不能成为 sealed 类型的直接子类型。</li>
+</ul>
+
+<h2 id="visibility">可见性</h2>
+<div class="table-wrap"><table>
+  <tr><th>修饰符</th><th>顶层声明</th><th>成员</th></tr>
+  <tr><td><code>public</code></td><td>任何依赖该 Cone 的代码</td><td>能看到所属类型的任何代码</td></tr>
+  <tr><td><code>internal</code>（<strong>默认</strong>）</td><td>同一个 Cone</td><td>同一个 Cone</td></tr>
+  <tr><td><code>protected</code></td><td>不适用</td><td>声明它的类及其子类的 body（仅 class 成员）</td></tr>
+  <tr><td><code>private</code></td><td>同一个源文件</td><td>声明它的类型内部</td></tr>
+</table></div>
+<ul>
+  <li>省略修饰符就是 <code>internal</code>，可见性不会从外层类型、基类或接口继承。对外公开的 API 必须显式写 <code>public</code>。</li>
+  <li>成员的实际可见范围是它自身的可见性与所有外层类型可见性的交集。</li>
+  <li>覆写省略修饰符时同样是 <code>internal</code>：覆写 <code>public</code> 接口或基类的成员必须写 <code>public override</code>，否则是编译错误。</li>
+  <li>通过显式接收者访问 <code>protected</code> 成员时，接收者的静态类型必须是当前类或其子类。</li>
+  <li><code>private</code> 成员不会被继承或覆写；<code>internal open</code> 成员只能在同一 Cone 中覆写。</li>
+  <li>公开声明的签名（参数、结果、父类型、上界）不能引用可见范围更小的类型。</li>
+</ul>
+
+<h2 id="delegation">委托</h2>
+<h3 id="property-delegation">属性委托</h3>
+<p><code>val/var p: T by expr</code> 把属性的读写交给委托对象。委托对象通过显式声明为 <code>operator</code> 的成员或扩展提供以下函数：</p>
+<ul>
+  <li><code>operator fun getValue(thisRef: R): T</code>（必需）；</li>
+  <li><code>operator fun setValue(thisRef: R, value: T): Unit</code>（<code>var</code> 必需）；</li>
+  <li><code>operator fun provideDelegate(): D</code>（可选，在初始化时调用一次，返回真正的委托）。</li>
+</ul>
+<p><code>R</code> 是成员属性的所属类型、扩展属性的接收者类型，局部与顶层属性则为 <code>Unit</code>。协议中没有属性名或反射信息，需要时在 <code>by</code> 表达式中显式传入。</p>
+<pre><code class="language-scoop">class Lazy&lt;T&gt;(val compute: () -&gt; T) {
+    var cached: T? = None
+    operator fun getValue(thisRef: Unit): T = when (val c = cached) {
+        case Some(v) -&gt; v
+        case None -&gt; {
+            val v = compute()
+            cached = Some(v)
+            v
+        }
+    }
+}
+
+class Observable(var current: Int) {
+    operator fun getValue(thisRef: Model): Int = current
+    operator fun setValue(thisRef: Model, value: Int) {
+        println(f"changed to ${value}")
+        current = value
+    }
+}
+
+class Model {
+    var score: Int by Observable(0)
+}
+
+fun main() {
+    val answer by Lazy { println("computing"); 42 }
+    println(answer)        // computing, 42
+    println(answer)        // 42
+    val m = Model()
+    m.score = 5            // changed to 5
+}</code></pre>
+<p>委托表达式在属性初始化时求值一次。委托调用是同步的，可以分配内存和抛出异常，但不能挂起。struct 与 enum 不能有委托属性。</p>
+
+<h3 id="interface-delegation">接口委托</h3>
+<p>class 或 object 的接口列表中可以写 <code>I by expr</code>：未被显式实现的接口成员自动转发给 <code>expr</code> 的值。表达式在构造时求值一次并保存在实例中。</p>
+<pre><code class="language-scoop">interface Printer {
+    fun print(text: String): String
+    fun name(): String = "printer"
+}
+
+class Exclaim : Printer {
+    override fun print(text: String): String = text + "!"
+}
+
+class Logged(inner: Printer) : Printer by inner {
+    override fun name(): String = "logged"      // 显式实现优先于转发
+}
+
+fun main() {
+    val p = Logged(Exclaim())
+    println(p.print("hi") + " " + p.name())
+}</code></pre>
+<p>转发优先于接口的默认实现；多个委托都能提供同一个成员时必须显式覆写。被委托对象内部的调用仍作用于它自身，不会转到宿主的覆写。</p>
+
+<h2 id="conditional-conformance">条件接口实现</h2>
+<p>泛型类型可以只在类型实参满足条件时实现某个接口。在类型 body 中写 <code>override interface 接口 where 条件 { 成员 }</code>：</p>
+<pre><code class="language-scoop">struct Box&lt;T&gt;(val value: T) {
+    override interface ToString where T : ToString {
+        public override fun toString(): String = f"Box(${value.toString()})"
+    }
+    override interface Hash where T : Hash {
+        public override fun hash(): Long = value.hash()
+    }
+}
+
+fun main() {
+    println(Box("x"))                      // Box&lt;String&gt; 实现了 ToString
+    println(Box(3).hash() == 3.hash())     // Box&lt;Int&gt; 实现了 Hash
+}</code></pre>
+<ul>
+  <li>条件只影响该接口是否成立：<code>Box&lt;T&gt;</code> 对任意 <code>T</code> 都可以构造和使用，只有 <code>T : ToString</code> 时 <code>Box&lt;T&gt;</code> 才是 <code>ToString</code>。</li>
+  <li><code>where</code> 子句必填，条件可以是宿主类型参数的类或接口上界、<code>value</code>/<code>ref</code>，或 <code>T.Companion : I</code>。</li>
+  <li>块中只能包含实现目标接口的覆写成员，不能有字段、构造函数、嵌套声明或辅助函数。块只能写在类型自己的 body 中，不能在别处为已有类型追加实现。</li>
+  <li>同一类型对同一接口的多份实现不能有可能重叠的适用范围。</li>
+</ul>
+
+<h2 id="release">release 块</h2>
+<p>直接持有原生资源的 final class 可以声明一个 <code>release { … }</code> 块，在对象被垃圾回收时<strong>尽力</strong>清理遗漏释放的资源：</p>
+<pre><code class="language-scoop">@Extern(name = "malloc")
+fun nativeAlloc(size: ULong): Option&lt;Ptr&lt;Unit&gt;&gt;
+
+@Extern(name = "free")
+fun nativeFree(address: Ptr&lt;Unit&gt;)
+
+final class NativeBuffer private constructor(private var handle: Option&lt;Ptr&lt;Unit&gt;&gt;) : Closeable {
+    public override fun close() {
+        val owned = handle
+        handle = None                       // 先置为惰性状态，再释放
+        when (owned) {
+            case Some(p) -&gt; @Unsafe { nativeFree(p) }
+            case None -&gt; {}
+        }
+    }
+
+    release {
+        when (handle) {
+            case Some(p) -&gt; @Unsafe { nativeFree(p) }
+            case None -&gt; {}
+        }
+    }
+
+    companion object {
+        @Unsafe
+        fun allocate(size: ULong): NativeBuffer = NativeBuffer(nativeAlloc(size))
+    }
+}
+
+fun main() {
+    @Unsafe {
+        NativeBuffer.allocate(64uL).use { println("using buffer") }
+    }
+}</code></pre>
+<ul>
+  <li>宿主必须是普通的、可实例化的 final class，不能是 open/abstract/sealed、object、struct 或异常类。</li>
+  <li>块内只能读取本类自己声明的字段的副本，不能使用 <code>this</code>、调用本对象的方法或写字段。</li>
+  <li>块内的操作必须不分配托管对象、不抛异常、不挂起，读取的值必须是不含托管引用的类型（数值、<code>Ptr</code> 等）；可以在 <code>@Unsafe</code> 中直接调用 C 函数，或调用满足同样限制的 <code>@NoGC</code> 辅助函数。</li>
+  <li>它不保证何时执行、在哪个线程执行，也不保证程序退出时执行；只有构造成功的对象才会执行。<strong>确定性释放仍然依靠 <code>close</code> 与 <a href="exceptions.html#resources"><code>use</code></a></strong>，<code>release</code> 只是兜底。</li>
+</ul>
+<p>Scoop 没有终结器、析构函数或对象复活。</p>

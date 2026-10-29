@@ -1,0 +1,209 @@
+<!-- title: 协程与并发; nav: reference; layout: reference; description: Scoop 的 suspend 函数与协程原语、结构化并发（coroutineScope、launch、async、Job、取消）、事件循环、线程与数据竞争规则，以及原子类型与内存序。 -->
+<h1>协程与并发</h1>
+<p class="intro">Scoop 在语言层提供 <code>suspend</code> 函数和最小的协程原语，核心库在其上实现结构化并发；事件循环与异步 I/O 由 <code>scoop.asyncio</code> 提供。Scoop 也支持多线程，但<strong>不在类型系统中保证没有数据竞争</strong>，跨线程共享状态需要显式使用原子类型或同步原语。</p>
+
+<h2 id="suspend">suspend 函数</h2>
+<p><code>suspend fun</code> 声明可以挂起的函数。挂起函数只能在另一个挂起函数或挂起 lambda（<code>suspend { … }</code>）中调用；<code>main</code> 必须是普通函数，从普通代码启动挂起计算使用核心库的 <code>startCoroutine</code> 或事件循环。</p>
+<ul>
+  <li>调用挂起函数可能立即在当前调用栈内得到结果，也可能保存当前计算、稍后恢复；无论哪种情况，调用方都只观察到一次普通的返回值或一次在调用点抛出的异常。</li>
+  <li>挂起前已经求值的实参不会重新求值，跨挂起点存活的局部变量会被保留，源码的从左到右求值顺序不变。</li>
+  <li>挂起不是退出：<code>finally</code> 不会因为挂起而执行；以异常恢复等价于在挂起点 <code>throw</code>。</li>
+  <li>挂起性是签名的一部分：覆写必须保持一致，<code>suspend (A) -&gt; R</code> 与 <code>(A) -&gt; R</code> 不兼容；普通 lambda 不会自动变成挂起 lambda。只相差 <code>suspend</code> 的两个函数是重复声明。</li>
+  <li>以下位置<strong>不能挂起</strong>：顶层属性与 object 的初始化、类的构造函数、属性初始值与 <code>init</code> 块、默认参数（挂起函数自身的默认参数除外）、属性的 getter/setter 与委托协议。需要异步取得的值应暴露为挂起函数。</li>
+  <li>不支持挂起的 FFI：<code>@Extern</code> 函数不能是 <code>suspend</code>。</li>
+</ul>
+
+<h2 id="primitives">协程原语</h2>
+<p>核心库定义了支撑 <code>suspend</code> 的最小接口：</p>
+<pre data-check="skip"><code class="language-scoop">interface Continuation&lt;T&gt; {
+    fun resume(value: T)
+    fun resumeWithException(exception: Throwable)
+}
+
+fun &lt;T&gt; startCoroutine(task: suspend () -&gt; T, completion: Continuation&lt;T&gt;)
+suspend fun &lt;T&gt; suspendCoroutine(registration: (Continuation&lt;T&gt;) -&gt; Unit): T</code></pre>
+<ul>
+  <li><code>startCoroutine</code> 启动挂起计算后立即返回；计算完成时（可能在返回之前）恰好调用一次 <code>completion</code>。</li>
+  <li><code>suspendCoroutine</code> 把当前 continuation 交给 <code>registration</code>。可以同步恢复它，也可以保存起来以后恢复。</li>
+  <li><code>Continuation</code> 只能完成一次：再次调用 <code>resume</code> 或 <code>resumeWithException</code> 抛出 <code>IllegalStateException</code>。丢弃一个永不恢复的 continuation 不会执行其中的 <code>finally</code>。</li>
+  <li>两者也有接受 <code>SuspendTask&lt;T&gt;</code>、<code>SuspendRegistration&lt;T&gt;</code> 接口的重载，语义相同。原语本身不切换线程，也没有事件循环。</li>
+</ul>
+<pre><code class="language-scoop">class Report : Continuation&lt;Int&gt; {
+    public override fun resume(value: Int) {
+        println(f"completed with ${value}")
+    }
+    public override fun resumeWithException(exception: Throwable) {
+        println("failed")
+    }
+}
+
+class Gate {
+    var waiting: Continuation&lt;Int&gt;? = None
+    suspend fun await(): Int = suspendCoroutine&lt;Int&gt; { c -&gt; waiting = Some(c) }
+    fun open(value: Int) {
+        val c = waiting!!
+        waiting = None
+        c.resume(value)
+    }
+}
+
+suspend fun compute(gate: Gate): Int {
+    println("waiting")
+    val v = gate.await()            // 真正挂起：startCoroutine 返回给 main
+    println("resumed")
+    return v * 2
+}
+
+fun main() {
+    val gate = Gate()
+    startCoroutine(suspend { compute(gate) }, Report())
+    println("started")
+    gate.open(21)                   // 恢复协程，最终输出 completed with 42
+}</code></pre>
+
+<h2 id="structured">结构化并发</h2>
+<p>核心库在原语之上提供结构化的任务树：</p>
+<div class="table-wrap"><table>
+  <tr><th>声明</th><th>作用</th></tr>
+  <tr><td><code>suspend fun &lt;T&gt; coroutineScope(block: suspend (CoroutineScope) -&gt; T): T</code></td><td>建立子作用域；等待正文与所有子任务完成后才返回</td></tr>
+  <tr><td><code>scope.launch(block: suspend () -&gt; Unit): Job</code></td><td>启动不返回值的子任务</td></tr>
+  <tr><td><code>scope.async&lt;T&gt;(block: suspend () -&gt; T): Deferred&lt;T&gt;</code></td><td>启动返回值的子任务</td></tr>
+  <tr><td><code>job.join()</code> / <code>deferred.await()</code></td><td>等待任务结束 / 取得结果或重新抛出其异常；可以多次调用</td></tr>
+  <tr><td><code>job.cancel()</code>、<code>isCancelled</code>、<code>isCompleted</code></td><td>请求取消与查询状态</td></tr>
+  <tr><td><code>ensureActive()</code>、<code>currentJobOrNone()</code></td><td>在当前任务已取消时抛出 <code>CancellationException</code>；取得当前 <code>Job</code></td></tr>
+  <tr><td><code>job.invokeOnCancellation(handler)</code></td><td>登记取消回调，返回可撤销登记的 <code>Disposable</code></td></tr>
+  <tr><td><code>nonCancellableScope(block)</code></td><td>在取消之后仍需完成的异步清理</td></tr>
+  <tr><td><code>suspendCancellableCoroutine(registration)</code></td><td>能被所属任务取消的挂起点</td></tr>
+</table></div>
+<p>使用这些 API 需要一个驱动协程的事件循环。<code>scoop.asyncio</code> 的 <code>PlatformEventLoop.run</code> 是同步的根入口：它建立根作用域，运行到根正文和全部子任务完成后返回。</p>
+<pre><code class="language-scoop">//! dep: scoop:scoop.asyncio:0.1.0
+
+import scoop.asyncio.*
+import scoop.time.Duration
+
+fun main() {
+    val loop: EventLoop = PlatformEventLoop()
+    loop.run suspend { scope -&gt;
+        val total = coroutineScope&lt;Int&gt; suspend { inner -&gt;
+            val a = inner.async&lt;Int&gt; suspend {
+                loop.sleep(Duration.milliseconds(10L))
+                1
+            }
+            val b = inner.async&lt;Int&gt; suspend { 2 }
+            a.await() + b.await()
+        }
+        println(total)                                   // 3
+    }
+}</code></pre>
+<ul>
+  <li>子任务先登记到父任务再启动，可能在 <code>launch</code>/<code>async</code> 返回之前就同步完成。</li>
+  <li>作用域在正文结束后不再接受新的子任务，并在所有已登记的子任务完成后才发布结果。</li>
+  <li>子任务的失败（取消以外的异常）立即传播给父任务，并请求取消其他子任务；<code>coroutineScope</code> 先等子树收尾，再在调用点重新抛出这个失败，调用方可以捕获。未被 <code>await</code> 的 <code>async</code> 失败同样会传播。</li>
+  <li>每个 Job 保留首个记录的失败，后续的独立失败不会覆盖它。</li>
+  <li>子任务继承启动时的 <a href="functions.html#context">Context</a> 绑定快照。</li>
+</ul>
+
+<h3 id="cancellation">取消</h3>
+<p>取消是<strong>协作式</strong>的：<code>cancel()</code> 向任务及其后代发出请求，被取消的任务在检查点（<code>ensureActive()</code>、可取消的挂起操作，如事件循环的 <code>sleep</code> 与 I/O）抛出 <code>CancellationException</code>，<code>finally</code> 照常执行。正在执行的普通代码不会被抢占，原始的 <code>suspendCoroutine</code> 也不会自动观察取消。</p>
+<pre><code class="language-scoop">//! dep: scoop:scoop.asyncio:0.1.0
+
+import scoop.asyncio.*
+import scoop.time.Duration
+
+fun main() {
+    val loop: EventLoop = PlatformEventLoop()
+    loop.run suspend { scope -&gt;
+        val worker = scope.launch suspend {
+            try {
+                while (true) {
+                    loop.sleep(Duration.milliseconds(5L))   // 可取消的挂起点
+                }
+            } finally {
+                println("worker cleanup")
+            }
+        }
+        loop.sleep(Duration.milliseconds(20L))
+        worker.cancel()
+        worker.join()
+        println(f"cancelled=${worker.isCancelled}")
+
+        try {
+            coroutineScope&lt;Unit&gt; suspend { s -&gt;
+                s.launch suspend { throw IllegalStateException(Some("child failed")) }
+                loop.sleep(Duration.milliseconds(50L))
+            }
+        } catch (e: IllegalStateException) {
+            println(f"caught ${e.message ?: ""}")
+        }
+    }
+}</code></pre>
+<ul>
+  <li>单独取消子任务不会取消父任务；取消父任务会传播给所有后代。</li>
+  <li><code>join</code>/<code>await</code> 的等待可以被等待者自身的取消打断，但这不会取消被等待的任务。</li>
+  <li><code>coroutineScope</code> 内部等待子树收尾时不会被调用方的取消提前打断。</li>
+  <li>取消之后需要挂起才能完成的清理放在 <code>nonCancellableScope</code> 中。</li>
+  <li><code>suspendCancellableCoroutine</code> 的取消只结束等待，不保证外部操作已经停止；借用调用方缓冲区的 I/O 必须等到确认不再使用缓冲区后才能恢复。</li>
+</ul>
+
+<h3 id="event-loop">事件循环</h3>
+<p><code>PlatformEventLoop</code> 在 macOS 上使用 libdispatch，在 Linux 上使用 io_uring（要求内核 6.1 及所需能力，能力不足时报错而不是切换后端），在 Windows 上使用 IOCP（overlapped socket 与文件句柄，取消通过 <code>CancelIoEx</code> 撤销在途请求）。它提供定时器、TCP/UDP、DNS、异步文件与目录、TTY 等操作。<code>run</code> 只能调用一次，不能嵌套或在结束后复用；已有宿主主循环的程序使用 <code>attach</code>。详见<a href="stdlib.html#platform">库 Cone 一览</a>与 <a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-ASYNCIO-SPEC.md">异步 I/O 规范</a>。</p>
+
+<h2 id="threads">线程与数据竞争</h2>
+<p><code>scoop.platform.concurrent</code> 提供 <code>Thread</code>、<code>Mutex</code>、<code>ConditionVariable</code> 等同步原语。Scoop <strong>不提供</strong> Rust 或 Swift 式的并发安全保证：</p>
+<ul>
+  <li><strong>数据竞争</strong>是指不同线程访问同一存储位置，至少一个是写、至少一个是非原子访问，且二者之间没有 happens-before 关系。</li>
+  <li><strong>数据竞争是未定义行为</strong>：可能读到无效的值、撕裂的值或破坏内存安全。普通字段、数组元素、全局变量与原生内存都适用，值类型与引用类型没有区别。</li>
+  <li>happens-before 由线程内的求值顺序、原子操作与同步原语按其契约建立。<code>val</code> 不自动提供跨线程同步；通过原子引用发布对象时，必须使用能建立同步的内存序。</li>
+  <li>GC、写屏障与 safepoint 不替代用户数据的同步。</li>
+</ul>
+<pre><code class="language-scoop">//! dep: scoop:scoop.platform:0.1.0
+
+import scoop.platform.concurrent.*
+
+fun main() {
+    val counter = AtomicLong(0L)
+    val threads = ArrayList&lt;Thread&gt;()
+    for (i in 0 until 4) {
+        threads.add(Thread.start {
+            for (j in 0 until 1000) counter.fetchAdd(1L)
+        })
+    }
+    for (t in threads) t.join()
+    println(counter.load())                     // 4000
+
+    val lock = Mutex()
+    val value = lock.withLock { 42 }
+    lock.dispose()
+    println(value)
+}</code></pre>
+<p><code>main</code> 返回时仍有未 join 的线程是关闭失败：程序报告剩余线程数并以退出码 1 结束。需要带着后台线程直接结束进程时调用 <code>exit(code)</code>。协程任务与线程是不同的概念：结构化并发不承诺任务在哪个线程上运行。</p>
+
+<h2 id="atomics">原子类型</h2>
+<p>核心库提供 <code>AtomicInt</code>、<code>AtomicLong</code>、<code>AtomicBoolean</code> 与 <code>AtomicRef&lt;T : ref&gt;</code>，构造时传入初值。它们是 final class，复制引用访问的是同一个存储位置。</p>
+<div class="table-wrap"><table>
+  <tr><th>方法</th><th>语义</th></tr>
+  <tr><td><code>load(order)</code> / <code>store(value, order)</code></td><td>原子读 / 写</td></tr>
+  <tr><td><code>exchange(value, order)</code></td><td>写入并返回旧值</td></tr>
+  <tr><td><code>compareAndSet(expected, value, successOrder, failureOrder)</code></td><td>相等时写入，返回是否成功（strong CAS）</td></tr>
+  <tr><td><code>compareAndExchange(…)</code></td><td>同上，返回观察到的旧值</td></tr>
+  <tr><td><code>fetchAdd</code> <code>fetchSub</code> <code>fetchAnd</code> <code>fetchOr</code> <code>fetchXor</code></td><td>原子更新并返回旧值（整数按位宽回绕；<code>AtomicBoolean</code> 只有位运算）</td></tr>
+  <tr><td><code>getAndUpdate(f)</code> / <code>updateAndGet(f)</code></td><td>基于 CAS 循环的更新，<code>f</code> 可能因竞争被调用多次</td></tr>
+</table></div>
+<ul>
+  <li>内存序 <code>MemoryOrder</code> 有 <code>Relaxed</code>、<code>Acquire</code>、<code>Release</code>、<code>AcqRel</code>、<code>SeqCst</code>，默认 <code>SeqCst</code>，语义与 C11 一致。</li>
+  <li>内存序必须是<strong>编译期常量</strong>（直接写出的变体或默认值），非法组合是编译错误：<code>load</code> 只接受 <code>Relaxed</code>/<code>Acquire</code>/<code>SeqCst</code>，<code>store</code> 只接受 <code>Relaxed</code>/<code>Release</code>/<code>SeqCst</code>，CAS 的失败序不能是 <code>Release</code>/<code>AcqRel</code>，也不能强于成功序。</li>
+  <li><code>AtomicRef</code> 的 CAS 比较对象 identity，不调用 <code>equals</code>；读取原子引用不会同步所指对象之后的普通字段访问。</li>
+  <li>原子类型不实现 <code>Equals</code>、<code>Hash</code> 或 <code>ToString</code>；比较时显式 <code>load()</code>。</li>
+  <li><code>Atomic&lt;T : value&gt;</code> 用一个内部锁保护任意值类型，提供 <code>load</code>、<code>store</code> 与 <code>exchange</code>，适合需要整体原子替换的小型结构。</li>
+</ul>
+<pre><code class="language-scoop">fun main() {
+    val ready = AtomicBoolean(false)
+    println(ready.compareAndSet(false, true, MemoryOrder.AcqRel, MemoryOrder.Acquire))   // true
+    val name = AtomicRef&lt;String&gt;("a")
+    println(name.exchange("b"))                     // a
+    val n = AtomicInt(5)
+    println(n.updateAndGet { it * 2 })              // 10
+    val point = Atomic&lt;(Int, Int)&gt;((1, 2))
+    point.store((3, 4))
+    println(point.load()._1)                        // 3
+}</code></pre>

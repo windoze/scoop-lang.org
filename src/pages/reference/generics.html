@@ -1,0 +1,209 @@
+<!-- title: 泛型; nav: reference; layout: reference; description: Scoop 泛型：单态化、类型参数与显式类型实参、不变性、上界与 where 子句、value/ref 约束、泛型方法的限制、负向约束、companion 约束与成员要求。 -->
+<h1>泛型</h1>
+<p class="intro">函数、class、struct、enum、interface 与类型别名都可以声明类型参数。Scoop 的泛型采用<strong>单态化</strong>：每组具体的类型实参生成一份专门的代码，没有类型擦除。所有类型参数都是<strong>不变</strong>的，没有 <code>in</code>/<code>out</code> 型变和 <code>*</code> 投影。</p>
+
+<h2 id="declaring">声明与使用</h2>
+<pre><code class="language-scoop">struct Pair&lt;A, B&gt;(val first: A, val second: B)
+
+class Stack&lt;T&gt; {
+    private val items = ArrayList&lt;T&gt;()
+    fun push(value: T) {
+        items.add(value)
+    }
+    fun pop(): T = items.removeAt(items.size - 1L)
+    fun &lt;R&gt; peekMap(transform: (T) -&gt; R): R = transform(items[items.size - 1L])
+}
+
+fun &lt;T&gt; firstOf(values: Array&lt;T&gt;): T = values[0]
+
+fun main() {
+    val stack = Stack&lt;Int&gt;()
+    stack.push(1)
+    stack.push(2)
+    println(stack.peekMap { it * 10 })        // 20
+    println(stack.pop())                      // 2
+    println(firstOf(["a", "b"]))
+    val p = Pair(1, "one")                    // 推断为 Pair&lt;Int, String&gt;
+    println(p.second)
+}</code></pre>
+<ul>
+  <li>每个完整的类型 application 都是独立的类型：<code>Pair&lt;Int, String&gt;</code> 与 <code>Pair&lt;Long, String&gt;</code> 互不相关，即使布局相同。</li>
+  <li>在类型位置必须写出全部类型实参：<code>Box</code> 单独作为类型是编译错误，也没有 <code>Box&lt;*&gt;</code>。</li>
+  <li>因为没有擦除，<code>is</code>/<code>as</code> 可以检查完整的类型实参（<code>x is Box&lt;Int&gt;</code>），泛型函数中可以使用 <code>typeInfo&lt;T&gt;()</code>、<code>sizeOf&lt;T&gt;()</code> 等依赖具体类型的操作，不需要 <code>reified</code>。</li>
+  <li>没有预定义的 <code>Self</code> 类型：接口要表达“实现者自身的类型”时，用显式的类型参数，例如 <code>Equals&lt;T&gt;</code>、<code>Compare&lt;T&gt;</code>。</li>
+</ul>
+
+<h2 id="type-arguments">类型实参与推断</h2>
+<p>调用泛型函数或构造泛型类型时，类型实参通常由实参与期望类型共同推断，推断结果不依赖实参的书写顺序。也可以显式写出类型实参，并用 <code>_</code> 让某些位置继续推断：</p>
+<pre><code class="language-scoop">fun &lt;A, B&gt; convert(value: A, transform: (A) -&gt; B): B = transform(value)
+
+struct Pair&lt;A, B&gt;(val first: A, val second: B)
+
+fun main() {
+    val text = convert&lt;Int, _&gt;(3) { it.toString() + "!" }
+    val pair = Pair&lt;Long, _&gt;(1L, "one")
+    val empty: Array&lt;String&gt; = []                 // 由期望类型确定元素类型
+    println(f"${text} ${pair.first} ${empty.size}")
+}</code></pre>
+<ul>
+  <li>显式列表必须覆盖被调函数自己声明的全部类型参数，<code>_</code> 只能出现在调用或构造的类型实参列表中。</li>
+  <li>调用泛型类型上的方法时，只写方法自己的类型参数；宿主的类型实参来自接收者。</li>
+  <li>推断必须为每个类型参数找到唯一的解，不会用 <code>Any</code> 或上界去“猜”。无法确定时，请补充类型实参或期望类型。</li>
+</ul>
+
+<h2 id="invariance">不变性</h2>
+<p>即使 <code>Dog</code> 是 <code>Animal</code> 的子类型，<code>Array&lt;Dog&gt;</code> 也<strong>不是</strong> <code>Array&lt;Animal&gt;</code>，<code>Option&lt;Dog&gt;</code> 也不是 <code>Option&lt;Animal&gt;</code>。这一规则适用于所有类型参数，包括值类型：编译器不会为了赋值而重建或装箱整个容器。</p>
+<pre data-check="error"><code class="language-scoop">interface Animal {}
+class Dog : Animal
+
+fun main() {
+    val dogs: Array&lt;Dog&gt; = [Dog()]
+    val animals: Array&lt;Animal&gt; = dogs     // 编译错误：Array 是不变的
+}</code></pre>
+<p>需要“接受某个类型的任意子类型的容器”时，把消费操作写成带上界的泛型函数；需要转换容器时，显式构造或 <code>map</code> 出目标类型：</p>
+<pre><code class="language-scoop">interface Animal {
+    fun name(): String
+}
+
+class Dog : Animal {
+    override fun name(): String = "dog"
+}
+
+fun &lt;T : Animal&gt; names(animals: Array&lt;T&gt;): Long {
+    for (a in animals) println(a.name())
+    return animals.size
+}
+
+fun main() {
+    val dogs = [Dog(), Dog()]
+    println(names(dogs))                                   // 直接接受 Array&lt;Dog&gt;
+    val animals = Array&lt;Animal&gt;(dogs.size) { i -&gt; dogs[i] }   // 显式构造新数组
+    println(animals.size)
+}</code></pre>
+<p>类继承与接口实现仍然产生普通的子类型关系：<code>class IntList : ListBase&lt;Int&gt;</code> 使 <code>IntList</code> 是 <code>ListBase&lt;Int&gt;</code> 的子类型，但不是 <code>ListBase&lt;Any&gt;</code>。函数类型本身的参数逆变、结果协变不受这条规则影响。</p>
+
+<h2 id="bounds">上界与 where 子句</h2>
+<p><code>T : Bound</code> 要求类型实参是 <code>Bound</code> 的子类型，同时允许在函数体中使用 <code>Bound</code> 的成员。多个约束写在声明后的 <code>where</code> 子句中：</p>
+<pre><code class="language-scoop">interface Named {
+    fun name(): String
+}
+
+fun &lt;T : Compare&lt;T&gt;&gt; largest(a: T, b: T): T = if (a &gt; b) a else b
+
+fun &lt;T&gt; label(item: T): String where T : Named, T : ToString =
+    item.name() + " " + item.toString()
+
+struct Tag(val text: String) : Named, ToString {
+    override fun name(): String = "tag"
+    public override fun toString(): String = text
+}
+
+fun main() {
+    println(largest(3, 7))
+    println(largest("apple", "pear"))
+    println(label(Tag("x")))
+}</code></pre>
+<ul>
+  <li>同一参数至多有一个 class 上界，可以有多个不同的 interface 上界。</li>
+  <li>上界必须是参数完整的 class 或 interface application，例如 <code>T : Base&lt;String&gt;</code>；不能是值类型、函数类型、<code>Any</code> 或另一个类型参数。</li>
+  <li>上界可以引用被约束的参数本身：<code>T : Equals&lt;T&gt;</code> 表示“<code>T</code> 能与 <code>T</code> 比较”。</li>
+  <li>上界是<strong>名义</strong>的：类型必须显式声明实现了该接口。只有同名方法而没有声明实现的类型不满足上界。</li>
+  <li>对受约束的类型参数，只能使用上界提供的成员；没有上界的 <code>T</code> 甚至不能调用 <code>toString()</code>。</li>
+</ul>
+
+<h3 id="kind-bounds">value 与 ref 约束</h3>
+<p><code>T : value</code> 要求类型实参是值类型（struct、enum、tuple、基本类型），<code>T : ref</code> 要求是引用类型。它们主要用于 FFI 与底层容器，例如 <code>Ptr&lt;T : value&gt;</code>。kind 约束不能与 class/interface 上界同时用于同一参数。</p>
+<pre><code class="language-scoop">fun &lt;T : value&gt; byteSize(value: T): ULong = sizeOf&lt;T&gt;()
+
+fun &lt;T : ref&gt; sameObject(a: T, b: T): Boolean = a === b
+
+fun main() {
+    println(byteSize((1, 2L)))          // 16
+    val s = "x"
+    println(sameObject(s, s))
+}</code></pre>
+
+<h2 id="generic-methods">泛型方法的限制</h2>
+<ul>
+  <li><strong>接口方法不能声明自己的类型参数</strong>（接口本身可以是泛型的）：<code>interface I { fun &lt;T&gt; f(v: T) }</code> 是编译错误。</li>
+  <li>class 中的泛型方法必须是 final 的，不能 <code>open</code>、<code>abstract</code> 或 <code>override</code>；它们总是直接调用，不经过虚分派。</li>
+  <li>泛型方法有两组类型参数：宿主的类型实参由接收者决定，方法自己的类型实参由调用推断。两组参数不能重名。</li>
+  <li>泛型函数的函数引用必须由期望类型确定全部类型实参，Scoop 没有“仍然是泛型”的函数值。</li>
+</ul>
+<p>这些限制是单态化与固定虚表的直接结果。需要按类型分派的多态行为时，把类型参数提升到接口或类上：<code>interface Visitor&lt;R&gt; { fun visit(node: Node): R }</code>。</p>
+
+<h2 id="recursion">终止性</h2>
+<ul>
+  <li><strong>多态递归</strong>不受支持：泛型函数递归调用自身时若改变了类型实参（例如 <code>f&lt;T&gt;</code> 调用 <code>f&lt;Array&lt;T&gt;&gt;</code>），单态化无法终止，这是编译错误。</li>
+  <li>值类型的内联布局必须有限：<code>struct Node&lt;T&gt;(val value: T, val next: Node&lt;T&gt;)</code> 是编译错误。递归结构需要经过引用，例如改用 class 并把字段声明为 <code>Node&lt;T&gt;?</code>。</li>
+</ul>
+
+<h2 id="advanced-constraints">高级约束</h2>
+<p>以下约束只能用于<strong>有自己类型参数的函数</strong>（顶层、局部、扩展函数以及非接口的 final 泛型方法）。</p>
+
+<h3 id="negative-constraints">负向约束</h3>
+<p><code>T : !I</code> 要求类型实参<strong>确定不</strong>实现接口 <code>I</code>，常用来为“实现了 <code>I</code>”与“没有实现 <code>I</code>”的类型分别提供重载：</p>
+<pre><code class="language-scoop">interface Debug {
+    fun debug(): String
+}
+
+struct Point(val x: Int) : Debug {
+    override fun debug(): String = f"Point(${x})"
+}
+
+fun &lt;T : Debug&gt; render(value: T): String = value.debug()
+fun &lt;T : !Debug&gt; render(value: T): String = "&lt;no debug view&gt;"
+
+fun main() {
+    println(render(Point(1)))
+    println(render(42))
+}</code></pre>
+<p>负向条件只检查静态类型，只有确定成立时才能使用该候选；对未知的类型参数不会把“不知道”当作“没有实现”。</p>
+
+<h3 id="companion-constraints">companion 约束</h3>
+<p><code>where T.Companion : I&lt;T&gt;</code> 要求类型实参直接拥有一个 <code>public</code> companion，并且该 companion 实现了 <code>I&lt;T&gt;</code>。在函数体中可以用 <code>T.Companion</code> 访问它，<code>T.method(…)</code> 等价于 <code>T.Companion.method(…)</code>。这让“工厂”“解析器”“编解码器”这类按类型提供的能力可以静态选择：</p>
+<pre><code class="language-scoop">interface Parser&lt;T&gt; {
+    fun parse(text: String): T
+}
+
+struct Celsius(val degrees: Long) {
+    public companion object : Parser&lt;Celsius&gt; {
+        override fun parse(text: String): Celsius = Celsius(text.charLength)
+    }
+}
+
+fun &lt;T&gt; parseAll(texts: Array&lt;String&gt;): ArrayList&lt;T&gt; where T.Companion : Parser&lt;T&gt; {
+    val result = ArrayList&lt;T&gt;()
+    for (t in texts) result.add(T.parse(t))
+    return result
+}
+
+fun main() {
+    val values = parseAll&lt;Celsius&gt;(["12", "345"])
+    println(values[1].degrees)
+}</code></pre>
+<p>只能使用类型自己直接声明的 companion，不会回退到基类的 companion。核心库与 JSON 等库用这种约束提供 <code>Json.encodeToString(value)</code> 这样无需显式传入编解码器的重载，见<a href="annotations.html#codecs">编解码</a>。</p>
+
+<h3 id="requires">成员要求</h3>
+<p><code>where requires(…) { … }</code> 声明对类型实参<strong>公开成员</strong>的结构要求：</p>
+<pre><code class="language-scoop">class Tagged(val text: String) {
+    public fun label(): String = "tag " + text
+}
+
+class Version(val major: Int) {
+    public fun label(): String = f"v${major}"
+}
+
+fun &lt;T&gt; describe(value: T): String where requires(v: T) { v.label(): String } =
+    value.label()
+
+fun main() {
+    println(describe(Tagged("x")))
+    println(describe(Version(2)))
+}</code></pre>
+<ul>
+  <li>要求块中列出方法调用（必须写出结果类型）或构造调用 <code>T(text: String)</code>；<code>T.method(…)</code> 形式要求 companion 上的方法。可以在要求前标注 <code>suspend</code>、<code>@NoGC</code> 或 <code>@Unsafe</code>。</li>
+  <li>只查找类型自身<strong>公开</strong>的成员（包括继承的成员），不考虑扩展函数或调用点的可见性。</li>
+  <li>函数体先使用名义上界提供的成员，只有上界中没有适用目标时才使用要求。要求不提供运算符能力。</li>
+</ul>
+<p>需要按名义接口组织能力时，优先使用普通上界；成员要求适用于无法为已有类型添加接口实现的场合，例如测试库的 <code>assertEquals</code> 同时支持实现了 <code>Equals</code> 与只具备结构相等的类型。</p>

@@ -1,0 +1,119 @@
+<!-- title: 测试库 scoop.test; nav: reference; layout: reference; description: Scoop 测试库 scoop.test 参考：测试源码与依赖、@Test 容器与用例、BeforeTest/AfterTest/Ignore、断言函数与 AssertionFailure、每个用例的生命周期，以及 scoop test 的常用选项。 -->
+<h1>测试库 scoop.test</h1>
+<p class="intro"><code>scoop:scoop.test:0.1.0</code> 是普通的库 Cone，提供测试标记与断言。编译器根据标记为 Cone 生成测试入口，<code>scoop test</code> 构建并逐个运行用例。测试不依赖运行期反射或测试发现框架。</p>
+
+<h2 id="setup">测试源码与依赖</h2>
+<p>测试位于 Cone 的 <code>tests/</code> 目录（可用 <code>[[test.sources]]</code> 修改），测试库在 <code>[test-dependencies]</code> 中声明。<code>scoop new</code> 创建的项目已经包含这些配置和一个示例测试：</p>
+<pre><code class="language-toml">[test-dependencies]
+"scoop:scoop.test" = "0.1.0"</code></pre>
+<ul>
+  <li>测试源码与生产源码属于同一个 Cone，可以访问 <code>internal</code> 声明；文件同样需要 <code>package</code> 声明。</li>
+  <li>生产构建（<code>scoop build</code>/<code>run</code>）不读取测试源码与测试依赖，测试目录中的错误不影响生产构建；生产代码也看不到测试中的声明。</li>
+  <li>测试标记只能用在测试源码中。断言函数是普通函数，也可以在普通程序中调用。</li>
+</ul>
+
+<h2 id="declaring">声明测试</h2>
+<pre data-check="skip"><code class="language-scoop">package dev.example
+
+import scoop.test.*
+
+class Account(var balance: Long) {
+    fun withdraw(amount: Long) {
+        if (amount &gt; balance) throw IllegalStateException(Some("insufficient funds"))
+        balance -= amount
+    }
+}
+
+@Test
+private class AccountTests {
+    var account = Account(0L)
+
+    @BeforeTest
+    fun setUp() {
+        account = Account(100L)
+    }
+
+    @AfterTest
+    fun tearDown() {
+        println("teardown")
+    }
+
+    @Test
+    fun `withdraw reduces the balance`() {
+        account.withdraw(30L)
+        assertEquals(70L, account.balance)
+    }
+
+    @Test
+    fun `overdraft fails`() {
+        val e = assertFailsWith&lt;IllegalStateException&gt; { account.withdraw(500L) }
+        assertEquals(Some("insufficient funds"), e.message)
+    }
+
+    @Test
+    @Ignore("not implemented yet")
+    fun `interest is applied`() {
+        fail(Some("todo"))
+    }
+}</code></pre>
+<ul>
+  <li><strong>测试容器</strong>是标注 <code>@Test</code> 的顶层、具名、非泛型、可实例化的普通 class（不能是 abstract、sealed、嵌套、inner、struct、enum、interface 或 object），可以是 <code>private</code> 或 <code>internal</code>。它必须能以零个实参构造（允许默认参数）。</li>
+  <li><strong>测试用例</strong>是容器中直接声明并标注 <code>@Test</code> 的方法：没有参数、不是挂起函数、返回 <code>Unit</code>。方法名常用反引号写成一句话。</li>
+  <li>每个容器至多有一个 <code>@BeforeTest</code> 和一个 <code>@AfterTest</code> 方法，形态要求与用例相同，名称任意。</li>
+  <li><code>@Ignore(reason)</code> 必须与同一个方法上的 <code>@Test</code> 配对，被忽略的用例默认不运行。</li>
+  <li>容器上的 <code>@Test</code> 不会自动把所有方法当作用例，未标注的方法是普通辅助方法。只发现当前 Cone 测试源码中直接声明的用例，不继承基类的用例。</li>
+  <li>形态不合法、孤立的 <code>@Ignore</code> 或重复的 hook 都是编译错误。</li>
+</ul>
+
+<h2 id="lifecycle">用例的生命周期</h2>
+<p>选中的用例<strong>依次串行</strong>执行，每个用例都使用一个新的容器实例：</p>
+<ol>
+  <li>构造容器（包括默认参数、属性初始值与 <code>init</code>）；</li>
+  <li>调用 <code>@BeforeTest</code>；</li>
+  <li>调用用例方法；</li>
+  <li>调用 <code>@AfterTest</code>。</li>
+</ol>
+<p>构造失败时跳过其余步骤；<code>@BeforeTest</code> 失败时跳过用例方法，但仍执行 <code>@AfterTest</code>；用例方法失败时同样执行 <code>@AfterTest</code>。<code>@AfterTest</code> 至多执行一次，它自身的失败单独报告，不会覆盖之前的失败。任何 <code>Throwable</code> 都使用例失败；panic、原生崩溃与进程退出不属于可捕获的失败，由测试命令另行报告。</p>
+
+<h2 id="assertions">断言</h2>
+<p>断言在 debug 与 release 构建中都会执行。每个断言都有可选的 <code>message: String?</code> 参数，以及默认取调用位置的 <code>location: SourceLocation</code> 参数；在自己的辅助函数中转发断言时，显式传递 <code>location</code> 以保留原始位置（见<a href="annotations.html#source-location">源码位置</a>）。</p>
+<div class="table-wrap"><table>
+  <tr><th>函数</th><th>成立条件</th></tr>
+  <tr><td><code>assertTrue(condition)</code> / <code>assertFalse(condition)</code></td><td>条件为真 / 为假</td></tr>
+  <tr><td><code>assertEquals(expected, actual)</code> / <code>assertNotEquals(expected, actual)</code></td><td><code>expected.equals(actual)</code> 为真 / 为假。适用于实现了 <code>Equals&lt;T&gt;</code> 的类型，也适用于只具备公开 <code>equals</code> 的类型（例如自动获得结构相等的 struct、enum 与 tuple）</td></tr>
+  <tr><td><code>assertSame(expected, actual)</code> / <code>assertNotSame(expected, actual)</code></td><td>引用 identity 相同 / 不同，只用于引用类型</td></tr>
+  <tr><td><code>assertFailsWith&lt;E&gt; { … }</code></td><td>代码块抛出 <code>E</code> 或其子类；返回捕获到的异常对象以便继续检查</td></tr>
+  <tr><td><code>fail(message): Nothing</code></td><td>总是失败</td></tr>
+</table></div>
+<p>断言失败时抛出 <code>AssertionFailure</code>。它继承 <code>Throwable</code> 而<strong>不</strong>继承 <code>Exception</code>，因此不会被测试代码中的 <code>catch (e: Exception)</code> 意外吞掉。它的字段包括：</p>
+<ul>
+  <li><code>kind</code>：断言的名称，例如 <code>"assertEquals"</code>；</li>
+  <li><code>message</code>、<code>location</code>：用户消息与断言位置；</li>
+  <li><code>expected</code>、<code>actual</code>：<code>AssertionValue</code>，值实现了 <code>ToString</code> 时为 <code>Text(…)</code>，否则为 <code>Unavailable</code>，字符串化本身抛出异常时为 <code>RenderingFailed(…)</code>；</li>
+  <li><code>cause</code>：<code>assertFailsWith</code> 捕获到类型不符的异常时保存该异常。</li>
+</ul>
+<p>比较函数本身抛出的异常原样传播，不会被转换为断言失败。</p>
+
+<h2 id="running">运行测试</h2>
+<pre><code class="language-sh">$ scoop test
+newcone
+  dev.example.AccountTests [failed]
+    withdraw reduces the balance (tests/basic.scoop:22:5) passed
+    overdraft fails (tests/basic.scoop:28:5) passed
+    deliberately failing (tests/basic.scoop:34:5) failed
+      body at dev.example:newcone:0.1.0/tests/basic.scoop:36:9
+      assertTrue: balance should be large
+      expected: true
+      actual: false
+    interest is applied (tests/basic.scoop:39:5) ignored: not implemented yet
+1 containers, 4 tests: 2 passed, 1 failed, 1 ignored, 0 not run</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>选项</th><th>作用</th></tr>
+  <tr><td><code>--filter TEXT</code></td><td>只运行完整名称（含容器名）包含 <code>TEXT</code> 的用例</td></tr>
+  <tr><td><code>--ignored</code></td><td>只运行标注了 <code>@Ignore</code> 的用例</td></tr>
+  <tr><td><code>--list</code></td><td>列出用例而不运行</td></tr>
+  <tr><td><code>--no-run</code></td><td>只构建测试程序</td></tr>
+  <tr><td><code>--nocapture</code></td><td>直接显示用例的 stdout/stderr，而不是在失败时汇总</td></tr>
+  <tr><td><code>--release</code>、<code>--workspace</code>、<code>-p group:name</code></td><td>与 <code>scoop build</code> 相同的构建与成员选择</td></tr>
+</table></div>
+<p>测试默认以 debug 配置构建，异常的栈快照默认开启。完整选项见 <code>scoop test --help</code>，编写测试的完整流程见<a href="../guides/index.html">用户指南</a>。</p>

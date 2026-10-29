@@ -76,7 +76,7 @@
   <li><strong>FFI 支持</strong>：Scoop ABI 的 runtime functions（分配、root、pin、handle、托管回调）与 C 头文件 <code>scoop_rt.h</code>。</li>
 </ul>
 <p>运行时不重新进行名称解析、重载选择或泛型实例化——这些都在编译期完成。</p>
-<p>异步 I/O 驱动属于普通库 <code>scoop.asyncio</code>。<code>PlatformEventLoop</code> 在 Darwin 使用系统 libdispatch，在 Linux 使用 io_uring/liburing；任务树复用 core 的 Job/CoroutineScope。原生 callback 与 worker 只产生完成记录，由所属事件循环推进 I/O continuation；宿主主循环可通过 <code>attach</code> 接入。它不增加编译器内建调度器或新的 runtime ABI。</p>
+<p>异步 I/O 驱动属于普通库 <code>scoop.asyncio</code>。<code>PlatformEventLoop</code> 在 Darwin 使用系统 libdispatch，在 Linux 使用 io_uring/liburing，在 Windows 使用 IOCP；任务树复用 core 的 Job/CoroutineScope。原生 callback 与 worker 只产生完成记录，由所属事件循环推进 I/O continuation；宿主主循环可通过 <code>attach</code> 接入。它不增加编译器内建调度器或新的 runtime ABI。</p>
 
 <h2 id="specs">规范文档</h2>
 <p>Scoop 遵循“spec 先行”：语言行为、运行时契约与流水线职责的变更都先修改规范。主要文档（中文）：</p>

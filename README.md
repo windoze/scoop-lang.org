@@ -7,7 +7,9 @@ Scoop 编程语言的官方网站源码。纯静态站点，不依赖任何前�
 - `src/layout.html` — 所有页面共用的外框（导航、页脚）。
 - `src/pages/` — 页面正文片段。首行是元数据注释，例如
   `<!-- title: 语言导览; nav: tour; layout: docs; description: … -->`；
-  `layout: docs` 会加上自动生成的侧边目录。
+  `layout: docs` 会加上自动生成的侧边目录；`layout: reference` 另加参考文档的章节导航与上一章/下一章链接，
+  章节顺序由 `tools/build.py` 中的 `REFERENCE` 定义。`redirect: 目标` 把页面变为跳转页，用于保留旧地址。
+- `src/pages/reference/` — 参考文档：语言参考各章与标准库参考（核心库、库 Cone 一览、测试库）。
 - `guides/` — 从 Scoop 仓库迁入的用户指南与文档大纲，使用带 YAML front matter 的 Jekyll Markdown。
   `guides/_layouts/guide.html` 提供页面布局与指南导航；`guides/examples/` 保存指南示例。
 - `_config.yml`、`Gemfile`、`Gemfile.lock` — Jekyll 配置与固定的 Ruby 依赖；指南输出到 `dist/guides/`。
@@ -16,6 +18,7 @@ Scoop 编程语言的官方网站源码。纯静态站点，不依赖任何前�
 - `assets/` — 样式、Scoop 语法高亮与页面脚本、logo。
 - `tools/build.py` — 生成官网页面并调用 Jekyll，统一输出到 `dist/`。
 - `tools/check_examples.py` — 用 `scoop` 编译运行官网和指南示例，并与 `.out` 比对。
+- `tools/check_reference.py` — 用 `scoop check` 检查参考文档中的每个 Scoop 代码块。
 - `data/api-docs.tar.xz` — 发布用的 API 文档快照，CI 解包后复制到 `dist/api/`。
 
 ## 构建
@@ -79,6 +82,15 @@ python3 tools/check_examples.py --update   # 用实际输出重写 .out
 ```
 
 没有 `.out` 的示例（如会一直运行的 HTTP 服务）只检查能否编译。
+
+参考文档中的代码块直接写在页面里，修改参考文档或升级工具链后运行：
+
+```sh
+python3 tools/check_reference.py              # 全部参考页
+python3 tools/check_reference.py types ffi    # 指定页面
+```
+
+每个代码块作为独立的单文件程序检查：含 `fun main` 的按原样检查，否则依次尝试作为顶层声明、作为 `main` 中的语句。演示编译错误的代码块在 `<pre>` 上标注 `data-check="error"`，需要 `Cone.toml`、多文件或额外文件的片段标注 `data-check="skip"`。
 
 更新技术说明时，以 Scoop 仓库当前 `docs/specs/`、CLI 定义和内置库源码为依据，区分已实现能力与后续设计；历史里程碑中的后端名称和旧工具包说明可能已经过时。修改共享示例后重新验证，构建时嵌入源码与实际预期输出。API 页面由 `scoop doc` 生成，应从匹配工具链的文档目录复制，不直接修改 `dist/api/`。
 

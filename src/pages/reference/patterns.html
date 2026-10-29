@@ -1,0 +1,203 @@
+<!-- title: when 与模式匹配; nav: reference; layout: reference; description: Scoop 的 when 表达式：值、类型与区间分支，case 模式（enum、tuple、struct、字面量）、guard、subject 声明、smart cast 与穷尽性检查。 -->
+<h1>when 与模式匹配</h1>
+<p class="intro"><code>when</code> 是 Scoop 的多路分支结构。普通分支沿用 Kotlin 的语义，按值、类型或包含关系判断；以 <code>case</code> 开头的分支使用<strong>模式</strong>，可以嵌套解构 enum、tuple 与 struct，并由编译器检查是否覆盖了所有可能的值。</p>
+
+<h2 id="forms">三种形式</h2>
+<pre><code class="language-scoop">fun load(): Any = "payload"
+fun ready(): Boolean = true
+
+fun main() {
+    val code = 404
+    when (code) {                       // 1. 带 subject
+        200 -&gt; println("ok")
+        404 -&gt; println("not found")
+        else -&gt; println("other")
+    }
+
+    when {                              // 2. 不带 subject：每个条件都是 Boolean
+        ready() -&gt; println("ready")
+        else -&gt; println("waiting")
+    }
+
+    when (val item = load()) {          // 3. 在头部声明 subject
+        is String -&gt; println(item.charLength)
+        else -&gt; println("other")
+    }
+}</code></pre>
+<ul>
+  <li>有 subject 时，subject 先求值且只求值一次。</li>
+  <li>各分支按书写顺序尝试，只执行第一个成立的分支，没有 fallthrough。</li>
+  <li>分支体可以是表达式、代码块，或 <code>return</code>、<code>throw</code>、<code>break</code>、<code>continue</code>、赋值等单个语句。单行分支以换行结束，同一行写多个分支时用 <code>;</code> 分隔。</li>
+  <li><code>when (val 模式 = 表达式)</code> 声明的名称在所有条件、guard 和分支体中可见，离开 <code>when</code> 后失效。头部可以使用不可失败的<a href="values.html#destructuring">解构模式</a>，但被匹配的仍是<strong>完整的值</strong>，而不是解构出的某个部分。</li>
+</ul>
+
+<h2 id="conditions">普通分支</h2>
+<p>不以 <code>case</code> 开头的分支是普通分支：</p>
+<div class="table-wrap"><table>
+  <tr><th>分支头</th><th>含义</th></tr>
+  <tr><td><code>expr</code></td><td><code>subject == expr</code></td></tr>
+  <tr><td><code>is T</code> / <code>!is T</code></td><td>subject 的类型检查；成立时在分支内 smart cast</td></tr>
+  <tr><td><code>in expr</code> / <code>!in expr</code></td><td><code>expr.contains(subject)</code>，适用于区间和任何提供 <code>contains</code> 的类型</td></tr>
+  <tr><td><code>c1, c2, …</code></td><td>任一条件成立即选中，按顺序短路</td></tr>
+  <tr><td><code>else</code></td><td>无条件选中；至多一个，必须是最后一个分支</td></tr>
+  <tr><td><code>else if cond</code></td><td>带 guard 的后备分支，可以有多个，后面仍可以有其他分支和最终的 <code>else</code></td></tr>
+</table></div>
+<pre><code class="language-scoop">fun classify(n: Int): String = when (n) {
+    0 -&gt; "zero"
+    1, 2, 3 -&gt; "small"
+    in 4..9 -&gt; "digit"
+    else -&gt; "large"
+}
+
+fun main() {
+    println(classify(2) + " " + classify(7) + " " + classify(42))
+}</code></pre>
+<ul>
+  <li>普通分支中的表达式只在执行到该分支时求值，不会预先计算后续分支。</li>
+  <li>值比较使用 subject 静态类型上的 <code>equals</code>，规则与 <code>==</code> 相同；静态类型为 <code>Any</code> 的 subject 不能用值分支。需要比较引用 identity 时，用不带 subject 的 <code>when { x === y -&gt; … }</code>。</li>
+  <li>不带 subject 的 <code>when</code> 中不能直接写 <code>is T</code>、<code>in xs</code> 或 <code>case</code>，应写完整的 <code>x is T</code>、<code>x in xs</code>；也不支持 guard，用 <code>&amp;&amp;</code> 组合条件。</li>
+</ul>
+
+<h2 id="guards">guard</h2>
+<p>带 subject 的单个普通条件或 <code>case</code> 模式后可以加 <code>if 条件</code> 作为 guard，括号可选。主条件成立后才求值 guard，guard 为假时继续尝试后续分支。用逗号连接多个条件的分支不能带 guard。</p>
+<pre><code class="language-scoop">fun describe(x: Any): String = when (x) {
+    is String if x.charLength &gt; 3L -&gt; "long string"
+    is String -&gt; "short string"
+    is Int -&gt; "int"
+    else -&gt; "other"
+}
+
+fun main() {
+    println(describe("hello") + ", " + describe("hi") + ", " + describe(7))
+}</code></pre>
+
+<h2 id="case-patterns">case 模式</h2>
+<p>以 <code>case</code> 开头的分支使用模式语义，模式可以引入新的绑定。一个分支只有一个模式，不支持用逗号并列多个模式；同一个 <code>when</code> 中可以混用普通分支与 <code>case</code> 分支。</p>
+<div class="table-wrap"><table>
+  <tr><th>模式</th><th>匹配</th></tr>
+  <tr><td><code>name</code></td><td>任意值，并绑定为 <code>name</code>（subject 为 enum 时先按变体名解释，见下文）</td></tr>
+  <tr><td><code>_</code></td><td>任意值，不绑定</td></tr>
+  <tr><td>字面量：<code>0</code>、<code>-1</code>、<code>2.5</code>、<code>'a'</code>、<code>"text"</code>、<code>true</code>、<code>()</code></td><td>与字面量相等的值</td></tr>
+  <tr><td><code>V</code>、<code>E.V</code></td><td>enum 的单元变体</td></tr>
+  <tr><td><code>V(p1, p2, …)</code></td><td>enum 的位置载荷变体，子模式匹配各载荷</td></tr>
+  <tr><td><code>V { f1, f2: p, .. }</code></td><td>enum 的命名字段变体</td></tr>
+  <tr><td><code>(p1, p2, …)</code></td><td>tuple，或按字段顺序匹配 struct</td></tr>
+  <tr><td><code>S { f1, f2: p, .. }</code>、<code>{ f1, .. }</code></td><td>按字段名匹配 struct，类型前缀可以省略</td></tr>
+</table></div>
+<p>子模式可以任意嵌套，并可以使用 <code>..</code> 忽略其余元素或字段，规则与<a href="values.html#destructuring">解构</a>相同。负数字面量可以直接作为模式；其他常量表达式（包括 <code>const val</code>）不是模式。</p>
+<pre><code class="language-scoop">enum Shape {
+    Circle(Double),
+    Rect { width: Double, height: Double },
+    Empty
+}
+
+struct Point(val x: Int, val y: Int)
+
+fun area(shape: Shape): Double = when (shape) {
+    case Circle(r) if r &lt; 0.0 -&gt; 0.0
+    case Circle(r) -&gt; 3.14159 * r * r
+    case Rect { width, height } -&gt; width * height
+    case Empty -&gt; 0.0
+}
+
+fun locate(p: Point): String = when (p) {
+    case Point { x: 0, y: 0 } -&gt; "origin"
+    case { x: 0, .. } -&gt; "on the y axis"
+    case (x, 0) -&gt; f"on the x axis at ${x}"
+    case (x, y) -&gt; f"(${x}, ${y})"
+}
+
+fun describe(pair: (Int, Shape)): String = when (pair) {
+    case (0, _) -&gt; "first"
+    case (n, Circle(r)) if r &gt; 10.0 -&gt; f"#${n}: big circle"
+    case (n, _) -&gt; f"#${n}"
+}
+
+fun main() {
+    println(area(Shape.Rect(width = 2.0, height = 3.0)))
+    println(locate(Point(0, 5)))
+    println(describe((2, Shape.Circle(20.0))))
+}</code></pre>
+
+<h3 id="bare-identifiers">模式中的裸标识符</h3>
+<p>模式中的裸标识符<strong>不会引用</strong>已有的变量或常量，而是声明新的绑定。只有以下例外：</p>
+<ul>
+  <li><code>Unit</code> 与 <code>()</code> 总是 <code>Unit</code> 字面量；</li>
+  <li>subject（或对应的子值）是 enum 时，先在该 enum 中查找同名变体：命中单元变体就匹配该变体；命中带载荷的变体时报错，要求写出载荷形状 <code>V(…)</code>；完全没有命中时才成为匹配一切的绑定，并给出警告以提示可能的拼写错误。</li>
+</ul>
+<p>因此要与已有的常量比较，请使用普通分支或 guard：</p>
+<pre><code class="language-scoop">val LIMIT = 3
+
+fun check(n: Int): String = when (n) {
+    LIMIT -&gt; "at limit"                  // 普通分支：n == LIMIT
+    case x if x &gt; LIMIT -&gt; "over"        // case x 是新绑定，用 guard 比较
+    case _ -&gt; "under"
+}
+
+fun main() {
+    println(check(3) + " " + check(5) + " " + check(1))
+}</code></pre>
+<div class="callout warn">
+  <strong>常见错误</strong>
+  <p>写成 <code>case LIMIT -&gt; …</code> 时，<code>LIMIT</code> 是一个匹配任何值的新绑定，后续分支永远不会执行。</p>
+</div>
+
+<h3 id="enum-prefix">变体前缀</h3>
+<p>在模式中，变体名可以省略 enum 前缀，由被匹配值的类型解析；有歧义时写全名 <code>E.V</code>。泛型 enum 的前缀不需要重复写类型实参，类型实参取自 subject。</p>
+<p>struct 模式与 tuple 模式要求 subject 的静态类型就是该 struct 或 tuple。对 <code>Any</code>、接口或装箱值，先用 <code>is S</code> 分支做类型检查，再在分支内解构。</p>
+
+<h2 id="smart-casts">分支中的 smart cast</h2>
+<ul>
+  <li><code>is T</code> 成立后，guard 与分支体中可以把 subject 当作 <code>T</code> 使用。</li>
+  <li>一个分支有多个条件时，只保留所有条件共同建立的类型事实：<code>is A, is B</code> 的分支中 subject 不会同时被视为 <code>A</code> 与 <code>B</code>。</li>
+  <li>后续分支只继承所有到达路径共同成立的事实。例如无 guard 的 <code>!is T</code> 分支未被选中时，后续分支中 subject 是 <code>T</code>；而 <code>is T if check()</code> 未被选中，可能只是 guard 为假，不能推断 subject 不是 <code>T</code>。</li>
+  <li>可以收窄的 subject 是不可变局部变量、参数、头部的 <code>val</code> 绑定等稳定值。属性读取每次都可能变化，需要时用 <code>when (val x = obj.prop)</code>。</li>
+</ul>
+
+<h2 id="exhaustiveness">穷尽性</h2>
+<div class="table-wrap"><table>
+  <tr><th>使用形式</th><th>是否必须穷尽</th></tr>
+  <tr><td>任何作为值使用的 <code>when</code></td><td>必须</td></tr>
+  <tr><td>含有至少一个 <code>case</code> 分支的 <code>when</code>（即使作为语句）</td><td>必须</td></tr>
+  <tr><td>subject 为 <code>Boolean</code>、enum（包括 <code>Option</code>）或 sealed 类型、作为语句</td><td>必须</td></tr>
+  <tr><td>其他 subject 或不带 subject、作为语句</td><td>不必；没有分支成立时直接继续执行</td></tr>
+</table></div>
+<p>不穷尽时编译器报错，并给出一个未覆盖的值作为例子，例如 <code>missing pattern Some(-2147483648)</code>。也可以加 <code>else</code>（或 <code>case _</code>）覆盖剩余的值。覆盖规则：</p>
+<ul>
+  <li>enum 的覆盖按变体递归检查载荷：列出所有变体名而载荷没有覆盖完整，仍然不穷尽，例如 <code>Some(0)</code> 与 <code>None</code> 不能穷尽 <code>Option&lt;Int&gt;</code>。</li>
+  <li>tuple 与 struct 的各字段可以由多个分支共同覆盖：<code>(true, _)</code> 与 <code>(false, _)</code> 一起穷尽 <code>(Boolean, Int)</code>。</li>
+  <li><code>Boolean</code>、<code>Unit</code>、定宽整数与 <code>Char</code> 是有限域；<code>String</code> 与浮点数总是需要通配分支覆盖剩余的值（浮点模式按默认相等匹配，<code>0.0</code> 同时覆盖 <code>-0.0</code>）。</li>
+  <li><strong>带 guard 的分支不计入覆盖</strong>，因为 guard 可能为假；<code>else if</code> 也一样。</li>
+  <li>普通分支只有字面量与 enum 单元变体这类编译器能确定的值才计入覆盖；变量、函数调用、<code>in</code> 条件与用户自定义的 <code>equals</code> 都不计入。只含单元变体的 enum 用普通分支列出全部变体即可穷尽；整型枚举同样如此。</li>
+  <li>sealed class/interface 按其直接子类型递归展开，<code>is Child</code> 覆盖整个 <code>Child</code> 家族，见 <a href="classes.html#sealed">sealed</a>。普通 class 与接口的实现集合是开放的，总是需要 <code>else</code>。</li>
+  <li>不带 subject 的 <code>when</code> 作为值使用时必须有 <code>else</code>；把最后一个条件写成 <code>true</code> 不算 <code>else</code>。</li>
+</ul>
+<pre><code class="language-scoop">sealed interface Expr {}
+struct Num(val value: Int) : Expr
+struct Neg(val inner: Expr) : Expr
+struct Add(val left: Expr, val right: Expr) : Expr
+
+fun eval(e: Expr): Int = when (e) {      // sealed：无需 else
+    is Num -&gt; e.value
+    is Neg -&gt; -eval(e.inner)
+    is Add -&gt; eval(e.left) + eval(e.right)
+}
+
+fun flags(p: (Boolean, Boolean)): String = when (p) {
+    case (true, _) -&gt; "first"
+    case (false, true) -&gt; "second"
+    case (false, false) -&gt; "neither"
+}
+
+fun main() {
+    println(eval(Add(Num(2), Neg(Num(5)))))
+    println(flags((false, true)))
+}</code></pre>
+<pre data-check="error"><code class="language-scoop">fun f(n: Int): Int = when (n) {     // 编译错误：non-exhaustive when: missing pattern -2147483648
+    case x if x &gt; 0 -&gt; 1               // guard 分支不计入覆盖
+    case 0 -&gt; 0
+}</code></pre>
+
+<h2 id="result">结果类型</h2>
+<p>作为值使用时，每个正常结束的分支以其最后一个表达式作为结果；以 <code>return</code>、<code>throw</code>、<code>break</code>、<code>continue</code> 结束的分支不参与结果合并。存在期望类型时每个分支都必须适配它，否则取各分支的最小共同上界，规则见<a href="types.html#inference">类型推断</a>。所有分支都不正常结束时，整个 <code>when</code> 的类型为 <code>Nothing</code>。</p>
+<p>运行期始终按书写顺序匹配：先匹配模式结构，成功后才求值 guard。穷尽性检查不会改变这一顺序或副作用。</p>

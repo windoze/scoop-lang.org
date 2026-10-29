@@ -68,7 +68,7 @@
 <ul>
   <li>所有类型参数都是<strong>不变</strong>的：没有 <code>in</code>/<code>out</code> 型变和 <code>*</code> 投影，<code>Box&lt;String&gt;</code> 不是 <code>Box&lt;Any&gt;</code> 的子类型；</li>
   <li>调用处可以显式写类型实参，也可以用 <code>_</code> 只写一部分：<code>convert&lt;Int, _&gt;(value)</code>；</li>
-  <li><code>where</code> 子句、条件接口实现与负向约束等高级特性见语言规范 3.2、9.1.8 节。</li>
+  <li><code>where</code> 子句、负向约束与成员要求见参考文档的<a href="../reference/generics.html">泛型</a>一章，条件接口实现见<a href="../reference/classes.html#conditional-conformance">类、接口与对象</a>。</li>
 </ul>
 
 <h2 id="functions">函数值与集合</h2>
@@ -90,12 +90,12 @@
 <p>标准库的命名约定：可能失败的解析/查找提供抛异常版本与返回 <code>Option</code> 的 <code>…OrNone</code> 版本，例如 <code>toInt()</code> / <code>toIntOrNone()</code>。</p>
 
 <h2 id="coroutines">协程与异步 I/O</h2>
-<p>Scoop 支持 <code>suspend</code> 函数与挂起 lambda <code>suspend { … }</code>。核心库提供协程原语和结构化并发（<code>Job</code>、<code>Deferred</code>、作用域取消）；<code>scoop.asyncio</code> 的 <code>PlatformEventLoop</code> 提供定时器、TCP/UDP 与文件 I/O，macOS 后端使用 libdispatch，Linux 后端使用 io_uring：</p>
+<p>Scoop 支持 <code>suspend</code> 函数与挂起 lambda <code>suspend { … }</code>。核心库提供协程原语和结构化并发（<code>Job</code>、<code>Deferred</code>、作用域取消）；<code>scoop.asyncio</code> 的 <code>PlatformEventLoop</code> 提供定时器、TCP/UDP 与文件 I/O，macOS 后端使用 libdispatch，Linux 后端使用 io_uring，Windows 后端使用 IOCP：</p>
 {{example coroutines}}
 <ul>
   <li><code>scope.async</code> 启动返回值的任务，<code>scope.launch</code> 启动不返回值的任务，<code>await()</code> / <code>join()</code> 等待完成；</li>
   <li>任务树是结构化的：父作用域结束前等待所有子任务。取消是协作式的，由任务检查或支持取消的挂起操作观察，异常退出时 <code>finally</code> 照常执行；不会抢占正在执行的普通代码；</li>
-  <li><code>PlatformEventLoop</code> 只运行一次，不能嵌套启动或在结束后复用。Linux 后端要求内核 6.1 及所需 io_uring 能力；详见<a href="stdlib.html#platform">平台与异步 I/O</a>；</li>
+  <li><code>PlatformEventLoop</code> 只运行一次，不能嵌套启动或在结束后复用。Linux 后端要求内核 6.1 及所需 io_uring 能力；详见<a href="../reference/stdlib.html#platform">平台与异步 I/O</a>；</li>
   <li>Scoop 支持多线程，但不在类型系统中保证无数据竞争；跨线程共享数据需要使用原子类型（<code>Atomic*</code>，带显式内存序）或同步原语。</li>
 </ul>
 
@@ -155,4 +155,4 @@ private class CalculatorTests {
 <p><code>scoop test</code> 运行选中的用例并逐项报告结果；断言库还提供前后置钩子、忽略标记等功能，见 <code>scoop.test</code> 的 <a href="../api/index.html">API 文档</a>。</p>
 
 <h2 id="more">继续深入</h2>
-<p>这份导览只覆盖了常用部分。属性委托、接口委托、<code>inner class</code>、匿名 object、task-local 上下文参数 <code>context(name: T)</code>、文档注释、原子类型与内存序、<code>MaybeUninit&lt;T&gt;</code> 等特性，请阅读完整的<a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-SPEC.md">Scoop 语言规范</a>。</p>
+<p>这份导览只覆盖了常用部分。属性委托、接口委托、<code>inner class</code>、匿名 object、task-local 上下文参数 <code>context(name: T)</code>、文档注释、原子类型与内存序、<code>MaybeUninit&lt;T&gt;</code> 等特性，请阅读<a href="../reference/index.html">参考文档</a>；面向实现者的完整合同见 <a href="https://github.com/windoze/scoop/blob/main/docs/specs/SCOOP-SPEC.md">Scoop 语言规范</a>。</p>
