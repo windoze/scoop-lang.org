@@ -16,6 +16,7 @@ Scoop 编程语言的官方网站源码。纯静态站点，不依赖任何前�
 - `assets/` — 样式、Scoop 语法高亮与页面脚本、logo。
 - `tools/build.py` — 生成官网页面并调用 Jekyll，统一输出到 `dist/`。
 - `tools/check_examples.py` — 用 `scoop` 编译运行官网和指南示例，并与 `.out` 比对。
+- `data/api-docs.tar.xz` — 发布用的 API 文档快照，CI 解包后复制到 `dist/api/`。
 
 ## 构建
 
@@ -83,6 +84,83 @@ python3 tools/check_examples.py --update   # 用实际输出重写 .out
 
 ## 部署
 
-`dist/` 是自包含的静态文件，可以直接发布到 GitHub Pages、Netlify、Cloudflare Pages 或任何静态文件服务器。
+本站通过 [Release website](.github/workflows/release.yml) 工作流发布到 GitHub Pages，正式地址为 <https://scoop-lang.org>。以下事件会发布网站：
 
-部署时先执行 `python3 tools/build.py`，再上传完整的 `dist/`。GitHub Pages 等平台应发布构建产物，不要只用默认 Jekyll 流程构建仓库根目录，否则会缺少既有官网页面与 API 文档。
+- 推送到 `main`。
+- 发布正式 GitHub Release，构建该 Release 的 tag；预发布版本不会上线。
+- 在 Actions → Release website → Run workflow 中选择分支并手动运行。
+
+工作流使用 Python 3.13、Ruby 4.0 和 `Gemfile.lock` 安装依赖，执行 `tools/build.py`，将完整的 `dist/` 上传并部署。构建与部署是两个 job，构建失败不会替换线上网站。发布串行执行，不中断已经开始的部署。无需 PAT、部署密钥或 `gh-pages` 分支。
+
+### 发布用的 API 文档
+
+CI 使用仓库内的 `data/api-docs.tar.xz`，不依赖 runner 上预装 Scoop。压缩包顶层就是 `scoop doc` 生成的站点，包含 `index.html`、`assets/` 和 `c/`，不套额外的目录。首次快照收录于 2026-10-29，来自 Scoop `0.0.0-dev`（revision `d905383389656a9902085a5aab213100cc688c88`）的 `aarch64-apple-darwin` 文档；API 内容中的条件声明与该目标平台一致。
+
+更新工具链、生成并检查新的 API 文档后，在网站仓库根目录执行：
+
+```sh
+# 可替换为 scoop doc --output-dir 指定的目录。
+api_docs="$HOME/.scoop/docs/aarch64-apple-darwin"
+test -f "$api_docs/index.html" && COPYFILE_DISABLE=1 tar \
+  --exclude='.DS_Store' --exclude='._*' --exclude='.scoop-doc.json' \
+  -cJf data/api-docs.tar.xz -C "$api_docs" .
+```
+
+将快照和对应的页面修改一起提交；在提交说明中记录工具链版本或 Scoop commit，以及文档目标平台。无需提交展开后的数千个 HTML 文件。若切换目标平台或升级生成器后文档路径变化，检查官网中指向具体 API 页面的链接。
+
+本地复现 CI 构建（先按上文安装 Ruby 依赖）：
+
+```sh
+api_dir="$(mktemp -d)"
+tar -xJf data/api-docs.tar.xz -C "$api_dir"
+python3 tools/build.py --api-docs "$api_dir"
+rm -rf "$api_dir"
+```
+
+### 首次配置 GitHub Pages
+
+1. 将包含工作流的代码推送到 `windoze/scoop-lang.org` 的 `main` 分支。
+2. 打开仓库的 [Settings → Pages](https://github.com/windoze/scoop-lang.org/settings/pages)，在 **Build and deployment → Source** 中选择 **GitHub Actions**。
+3. 在同页的 **Custom domain** 中填写 `scoop-lang.org` 并保存，然后再修改下文的 DNS 记录。Actions 发布使用此设置绑定域名，仓库里的 `CNAME` 文件不起绑定作用，因此这里不添加该文件。
+4. 检查 **Settings → Environments → github-pages** 的部署分支规则：允许 `main`；如果使用 Release 发布，还需要允许相应的 tag，例如 tag 规则 `v*`。手动运行也必须选择允许部署的分支。
+5. 打开 [Actions](https://github.com/windoze/scoop-lang.org/actions/workflows/release.yml) 手动运行一次。若首次推送发生在启用 Pages 之前，配置完成后重新运行失败的工作流即可。
+
+仓库默认的 Actions 权限即可；工作流已为部署 job 声明 `pages: write` 和 `id-token: write`。若仓库限制了允许使用的 Actions，需要允许 `actions/*` 与 `ruby/setup-ruby`。
+
+以上流程使用 GitHub 官方的[自定义 Pages 工作流](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)，不会对生成后的 HTML 再执行默认 Jekyll 构建。
+
+### 配置域名 DNS
+
+在域名服务商处为 `scoop-lang.org` 添加以下记录；`@` 表示根域名，每个 IP 各建一条记录：
+
+| 类型 | 主机名 | 值 |
+| --- | --- | --- |
+| A | `@` | `185.199.108.153` |
+| A | `@` | `185.199.109.153` |
+| A | `@` | `185.199.110.153` |
+| A | `@` | `185.199.111.153` |
+| CNAME | `www` | `windoze.github.io` |
+
+`www` 指向用户名对应的 Pages 域名，不带仓库名或路径；GitHub 会将 `www.scoop-lang.org` 重定向到配置的 `scoop-lang.org`。替换服务商为 `@`、`www` 创建的冲突停车记录，保留邮件等其他用途的 DNS 记录。
+
+需要 IPv6 时，再添加以下四条 `AAAA` 记录，并保留上面的 `A` 记录：
+
+| 类型 | 主机名 | 值 |
+| --- | --- | --- |
+| AAAA | `@` | `2606:50c0:8000::153` |
+| AAAA | `@` | `2606:50c0:8001::153` |
+| AAAA | `@` | `2606:50c0:8002::153` |
+| AAAA | `@` | `2606:50c0:8003::153` |
+
+DNS 生效、GitHub 签发证书后，在 Settings → Pages 勾选 **Enforce HTTPS**。DNS 传播和 HTTPS 选项出现可能需要最多 24 小时。记录值与域名绑定规则见 GitHub 的[自定义域名说明](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site)。
+
+可以用以下命令检查解析：
+
+```sh
+dig +short scoop-lang.org A
+dig +short www.scoop-lang.org CNAME
+```
+
+发布后检查首页、`/guides/index.html`、`/guides/registry.html` 与 `/api/index.html`。本站按自定义域名的根路径发布；`_config.yml` 中的 `baseurl: /guides` 是指南路径，绑定域名时不需要修改它。
+
+`dist/` 也可以部署到其他静态文件服务器；应上传完整目录，包含官网、指南、assets 与 API 文档。

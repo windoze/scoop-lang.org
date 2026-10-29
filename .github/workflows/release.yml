@@ -1,0 +1,70 @@
+name: Release website
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name != 'release' || !github.event.release.prerelease
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: read
+    env:
+      JEKYLL_ENV: production
+    steps:
+      - name: Check out website
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Set up Ruby and install locked gems
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+          bundler-cache: true
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Unpack API documentation
+        run: |
+          mkdir -p "$RUNNER_TEMP/api-docs"
+          tar -xJf data/api-docs.tar.xz -C "$RUNNER_TEMP/api-docs"
+          test -f "$RUNNER_TEMP/api-docs/index.html"
+
+      - name: Build website and guides
+        run: python3 tools/build.py --api-docs "$RUNNER_TEMP/api-docs"
+
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
