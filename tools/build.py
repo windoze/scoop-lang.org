@@ -130,10 +130,14 @@ def render_reference(rel: str, root: str, body: str) -> str:
     pager = []
     if index > 0:
         href, label = REFERENCE_PAGES[index - 1]
-        pager.append(f'<a class="prev" href="{root}{href}"><small>上一章</small>{html.escape(label)}</a>')
+        pager.append(
+            f'<a class="prev" href="{root}{href}"><small>上一章</small>{html.escape(label)}</a>'
+        )
     if index + 1 < len(REFERENCE_PAGES):
         href, label = REFERENCE_PAGES[index + 1]
-        pager.append(f'<a class="next" href="{root}{href}"><small>下一章</small>{html.escape(label)}</a>')
+        pager.append(
+            f'<a class="next" href="{root}{href}"><small>下一章</small>{html.escape(label)}</a>'
+        )
     return (
         '<div class="docs reference">\n<aside>\n'
         + "\n".join(groups)
@@ -191,9 +195,7 @@ def main() -> int:
         type=Path,
         help="scoop doc output to publish under api/ (default: ~/.scoop/docs/<target>)",
     )
-    parser.add_argument(
-        "--no-api", action="store_true", help="skip copying the API docs"
-    )
+    parser.add_argument("--no-api", action="store_true", help="skip copying the API docs")
     args = parser.parse_args()
 
     bundle = shutil.which("bundle")
@@ -217,9 +219,8 @@ def main() -> int:
     for page in sorted(PAGES.rglob("*.html")):
         build_page(page, layout, out_dir)
     shutil.copytree(ASSETS, out_dir / "assets")
-    shutil.copytree(
-        EXAMPLES, out_dir / "examples", ignore=shutil.ignore_patterns("*.out")
-    )
+    shutil.copy2(ROOT / "install.sh", out_dir / "install.sh")
+    shutil.copytree(EXAMPLES, out_dir / "examples", ignore=shutil.ignore_patterns("*.out"))
 
     result = subprocess.run(
         [
@@ -239,9 +240,7 @@ def main() -> int:
     if not args.no_api:
         api = args.api_docs or default_api_docs()
         if api is None:
-            print(
-                "warning: no API docs found; api/ links will be broken", file=sys.stderr
-            )
+            print("warning: no API docs found; api/ links will be broken", file=sys.stderr)
         else:
             shutil.copytree(api, out_dir / "api")
             print(f"copied API docs from {api}")

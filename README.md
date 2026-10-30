@@ -17,6 +17,8 @@ Scoop 编程语言的官方网站源码。纯静态站点，不依赖任何前�
   在页面中用 `{{example NAME}}` 嵌入代码和输出，`{{example NAME nooutput}}` 只嵌入代码。
 - `assets/` — 样式、Scoop 语法高亮与页面脚本、logo。
 - `tools/build.py` — 生成官网页面并调用 Jekyll，统一输出到 `dist/`。
+- `install.sh` — macOS Apple Silicon／Linux x86-64 安装脚本，构建时原样复制到 `dist/install.sh`。
+- `tools/tests/test_install.py` — 用本地归档和隔离用户目录验证 `curl | sh` 安装、升级、PATH 配置及失败退出。
 - `tools/check_examples.py` — 用 `scoop` 编译运行官网和指南示例，并与 `.out` 比对。
 - `tools/check_reference.py` — 用 `scoop check` 检查参考文档中的每个 Scoop 代码块。
 - `data/api-docs.tar.xz` — 发布用的 API 文档快照，CI 解包后复制到 `dist/api/`。
@@ -46,7 +48,30 @@ python3 tools/build.py --api-docs /path/to/scoop-doc-output
 python3 -m http.server -d dist 8000
 ```
 
-API 文档由 `scoop doc` 生成，随工具链安装在 `~/.scoop/docs/<target-triple>`。
+API 文档由工具链的 post-install 调用 `scoop doc` 生成，位于 `~/.scoop/docs/<target-triple>`。
+
+## 工具链安装脚本
+
+站点部署后可运行：
+
+```sh
+curl -fsSL https://scoop-lang.org/install.sh | sh
+curl -fsSL https://scoop-lang.org/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://scoop-lang.org/install.sh | sh -s -- -- --jobs 2
+```
+
+脚本从 `windoze/scoop` 的 GitHub Releases 下载 `scoop-<version>-<host>.tar.xz`，默认选择最新稳定版，显式版本也可选择 prerelease。Release tag 使用 `v` 前缀，归档中的版本号不带 `v`。支持 `aarch64-apple-darwin` 和 `x86_64-unknown-linux-gnu`；Windows 使用 Release 中的 `x86_64-pc-windows-gnullvm` 包及随包 `post-install.ps1`，步骤见[安装页](src/pages/docs/install.html)。
+
+安装根固定为 `~/.scoop`；解压后执行随包 post-install，成功后幂等地更新 Bash、Zsh（支持 `ZDOTDIR`）、Fish（支持 `XDG_CONFIG_HOME`）或 POSIX shell 的配置。升级替换发行目录，保留 `packages`、`build` 及用户外部命令；未准备的其他目标不保留旧 `.slib`。脚本不会改变调用它的父 shell，当前终端可显式设置 PATH，或打开新终端。
+
+验证安装脚本无需下载真实发行包，也不写入当前用户的安装目录：
+
+```sh
+sh -n install.sh
+python3 -m unittest discover -s tools/tests
+```
+
+测试使用真实 `sh`、`tar` 和文件操作，以临时归档替代网络下载；发行包的真实 post-install 与程序编译运行由 Scoop 仓库的 Release workflow 验证。
 
 指南入口为 `http://localhost:8000/guides/index.html`。单独修改指南时，可以在完成一次完整构建后运行 `bundle exec jekyll build`，或用 `bundle exec jekyll build --watch` 持续更新 `dist/guides/`；保留上述 HTTP 服务即可预览。Jekyll 单独构建只输出指南，官网页面、共享 assets 和 API 仍由 `tools/build.py` 准备。
 

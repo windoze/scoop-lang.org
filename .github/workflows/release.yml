@@ -32,6 +32,11 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: Check the installer
+        run: |
+          sh -n install.sh
+          python3 -m unittest discover -s tools/tests
+
       - name: Set up Ruby and install locked gems
         uses: ruby/setup-ruby@v1
         with:
