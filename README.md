@@ -131,7 +131,7 @@ python3 tools/check_reference.py types ffi    # 指定页面
 
 ### 发布用的 API 文档
 
-CI 使用仓库内的 `data/api-docs.tar.xz`，不依赖 runner 上预装 Scoop。压缩包顶层就是 `scoop doc` 生成的站点，包含 `index.html`、`assets/` 和 `c/`，不套额外的目录。首次快照收录于 2026-10-29，来自 Scoop `0.0.0-dev`（revision `d905383389656a9902085a5aab213100cc688c88`）的 `aarch64-apple-darwin` 文档；API 内容中的条件声明与该目标平台一致。
+CI 使用仓库内的 `data/api-docs.tar.xz`，不依赖 runner 上预装 Scoop。压缩包顶层就是 `scoop doc` 生成的站点，包含 `index.html`、`assets/` 和 `c/`，不套额外的目录。当前快照更新于 2026-10-31，基于 Scoop `0.0.0-dev`（revision `35e26383d3ec3d57898978907b628b3a8daaa5b1`），使用 `codex/doc-html-style` 分支的文档样式生成，覆盖 `aarch64-apple-darwin` 的 27 个系统库；API 内容中的条件声明与该目标平台一致。
 
 更新工具链、生成并检查新的 API 文档后，在网站仓库根目录执行：
 
